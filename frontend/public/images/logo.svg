@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <rect width="120" height="120" rx="24" fill="#1B3A2D"/>
+  <rect x="8" y="8" width="104" height="104" rx="20" fill="#2D5A45" opacity="0.3"/>
+  <!-- Chopsticks -->
+  <line x1="40" y1="25" x2="55" y2="90" stroke="#D4842A" stroke-width="5" stroke-linecap="round"/>
+  <line x1="55" y1="25" x2="65" y2="90" stroke="#D4842A" stroke-width="5" stroke-linecap="round"/>
+  <!-- Sushi roll circle -->
+  <circle cx="75" cy="65" r="22" fill="#F5E6C8" opacity="0.9"/>
+  <circle cx="75" cy="65" r="16" fill="#2D5A45"/>
+  <circle cx="75" cy="65" r="10" fill="#D4842A"/>
+  <circle cx="75" cy="65" r="5" fill="#F5E6C8"/>
+  <!-- M Letter -->
+  <text x="60" y="110" font-family="serif" font-size="18" font-weight="bold" fill="#F5E6C8" text-anchor="middle" opacity="0.7">MAKIAVELO</text>
+</svg>
