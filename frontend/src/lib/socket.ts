@@ -24,12 +24,20 @@ export const connectSocket = (token: string, branchId: string): Socket => {
 
   s.auth = { token, branchId };
 
+  // Remove old listeners to avoid duplicates on reconnect
+  s.off('connect');
+  s.off('disconnect');
+  s.off('connect_error');
+
   if (!s.connected) {
     s.connect();
   }
 
   s.on('connect', () => {
     console.log('[Socket] Connected:', s.id);
+    // Join branch room so we receive scoped events (KDS ready notifications, etc.)
+    s.emit('join:branch', { branchId, userId: undefined });
+    console.log('[Socket] Joined branch room:', branchId);
   });
 
   s.on('disconnect', (reason) => {

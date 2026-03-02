@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+const LS_KEY = 'makiavelo-ready-notifications';
+
 export interface ReadyItemNotification {
   id: string;
   orderId: string;
@@ -22,32 +24,58 @@ interface NotificationsState {
   clearAll: () => void;
 }
 
+// Load initial state from localStorage
+const loadFromStorage = (): ReadyItemNotification[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) {
+      const items = JSON.parse(saved) as ReadyItemNotification[];
+      // Purge notifications older than 2 hours
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      return items.filter((n) => n.timestamp > twoHoursAgo);
+    }
+  } catch { /* ignore */ }
+  return [];
+};
+
+const saveToStorage = (items: ReadyItemNotification[]) => {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(items));
+  } catch { /* ignore */ }
+};
+
 export const useNotificationsStore = create<NotificationsState>((set, get) => ({
-  readyItems: [],
+  readyItems: loadFromStorage(),
 
   addReadyItem: (item) => {
+    // Avoid duplicates (same itemId + orderId)
+    const existing = get().readyItems;
+    if (existing.some((n) => n.itemId === item.itemId && n.orderId === item.orderId && n.status === 'READY')) {
+      return; // Already notified
+    }
     const notification: ReadyItemNotification = {
       ...item,
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp: Date.now(),
     };
-    set((state) => ({
-      readyItems: [...state.readyItems, notification],
-    }));
+    const updated = [...existing, notification];
+    saveToStorage(updated);
+    set({ readyItems: updated });
   },
 
   markDelivered: (itemId) => {
-    set((state) => ({
-      readyItems: state.readyItems.map((n) =>
-        n.itemId === itemId ? { ...n, status: 'DELIVERED' as const } : n
-      ),
-    }));
+    const updated = get().readyItems.map((n) =>
+      n.itemId === itemId ? { ...n, status: 'DELIVERED' as const } : n
+    );
+    saveToStorage(updated);
+    set({ readyItems: updated });
   },
 
   removeNotification: (id) => {
-    set((state) => ({
-      readyItems: state.readyItems.filter((n) => n.id !== id),
-    }));
+    const updated = get().readyItems.filter((n) => n.id !== id);
+    saveToStorage(updated);
+    set({ readyItems: updated });
   },
 
   getReadyItemsForTable: (tableNumber) => {
@@ -56,5 +84,8 @@ export const useNotificationsStore = create<NotificationsState>((set, get) => ({
     );
   },
 
-  clearAll: () => set({ readyItems: [] }),
+  clearAll: () => {
+    saveToStorage([]);
+    set({ readyItems: [] });
+  },
 }));

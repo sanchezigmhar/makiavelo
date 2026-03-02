@@ -368,7 +368,7 @@ function KdsPage() {
       // Bump ALL items in this order to READY via backend
       const pendingItems = order.items.filter((i: KdsOrderItem) => i.status !== 'READY');
       for (const item of pendingItems) {
-        try { await api.post(`/api/v1/kds/items/${item.id}/bump`); } catch { /* demo */ }
+        try { await api.post(`/kds/items/${item.id}/bump`); } catch { /* demo */ }
       }
 
       // Notify mesero for each item
@@ -401,7 +401,7 @@ function KdsPage() {
     const item = order?.items.find((i: KdsOrderItem) => i.id === itemId);
 
     // Try backend
-    try { await api.post(`/api/v1/kds/items/${itemId}/bump`); } catch { /* demo */ }
+    try { await api.post(`/kds/items/${itemId}/bump`); } catch { /* demo */ }
 
     // Update item to READY; if all items ready, mark order as READY
     const updated = allOrders.map((o) => {

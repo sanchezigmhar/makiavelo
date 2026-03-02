@@ -2405,7 +2405,7 @@ export default function MesasPage() {
               const handleDeliverItem = async (itemId: string) => {
                 // Try backend first
                 try {
-                  await api.post(`/api/v1/kds/items/${itemId}/deliver`);
+                  await api.post(`/kds/items/${itemId}/deliver`);
                 } catch {
                   // Demo mode fallback
                 }
@@ -2417,7 +2417,7 @@ export default function MesasPage() {
               const handleDeliverAll = async () => {
                 for (const notif of readyNotifs) {
                   try {
-                    await api.post(`/api/v1/kds/items/${notif.itemId}/deliver`);
+                    await api.post(`/kds/items/${notif.itemId}/deliver`);
                   } catch {
                     // Demo mode
                   }
