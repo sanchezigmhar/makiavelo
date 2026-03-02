@@ -20,6 +20,7 @@ import api from '@/lib/api';
 import { useSocketEvent } from '@/hooks/useSocket';
 import { useOrdersStore } from '@/store/orders.store';
 import { useAuthStore } from '@/store/auth.store';
+import { useNotificationsStore } from '@/store/notifications.store';
 import toast from 'react-hot-toast';
 
 const allStations = [
@@ -312,54 +313,64 @@ function KdsPage() {
 
   const handleBump = async (orderId: string) => {
     if (!isKitchenMode) return; // Only kitchen can bump
-    try {
-      const order = displayOrders.find((o) => o.id === orderId);
-      if (!order) return;
 
-      const newStatus = order.status === 'NEW' ? 'PREPARING' : 'READY';
+    const order = displayOrders.find((o) => o.id === orderId);
+    if (!order) return;
 
-      await api.patch(`/kds/orders/${orderId}/status`, { status: newStatus });
+    const newStatus = order.status === 'NEW' ? 'PREPARING' : 'READY';
 
-      setOrders((prev) =>
-        newStatus === 'READY'
-          ? prev.filter((o) => o.id !== orderId)
-          : prev.map((o) => o.id === orderId ? { ...o, status: newStatus as KdsOrder['status'] } : o)
-      );
+    if (newStatus === 'READY') {
+      // Bump ALL items in this order to READY via backend
+      let backendSuccess = false;
+      const pendingItems = order.items.filter((i: KdsOrderItem) => i.status !== 'READY');
 
-      if (newStatus === 'READY') {
-        toast.success(`Orden #${order.orderNumber} LISTA`, { duration: 2000 });
+      for (const item of pendingItems) {
+        try {
+          await api.post(`/api/v1/kds/items/${item.id}/bump`);
+          backendSuccess = true;
+        } catch {
+          // Will handle in demo mode below
+        }
       }
-    } catch {
-      // Demo mode
-      setOrders((prev) => {
-        const order = prev.find((o) => o.id === orderId);
-        if (!order) {
-          const dOrder = demoOrders.find((o) => o.id === orderId);
-          if (dOrder) {
-            const newStatus = dOrder.status === 'NEW' ? 'PREPARING' : 'READY';
-            if (newStatus === 'READY') {
-              toast.success(`Orden #${dOrder.orderNumber} LISTA`);
-            }
-          }
-          return prev;
-        }
-        const newStatus = order.status === 'NEW' ? 'PREPARING' : 'READY';
-        if (newStatus === 'READY') {
-          toast.success(`Orden #${order.orderNumber} LISTA`);
-          return prev.filter((o) => o.id !== orderId);
-        }
-        return prev.map((o) => o.id === orderId ? { ...o, status: newStatus as KdsOrder['status'] } : o);
+
+      // Notify mesero for each item (demo mode or as fallback)
+      order.items.forEach((item: KdsOrderItem) => {
+        useNotificationsStore.getState().addReadyItem({
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          itemId: item.id,
+          itemName: item.name,
+          tableNumber: order.tableNumber,
+          tableName: order.tableName,
+          status: 'READY',
+          quantity: item.quantity,
+        });
       });
+
+      toast.success(`Orden #${order.orderNumber} LISTA`, { duration: 2000 });
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    } else {
+      // NEW → PREPARING: just update local state
+      setOrders((prev) =>
+        prev.map((o) => o.id === orderId ? { ...o, status: 'PREPARING' as KdsOrder['status'] } : o)
+      );
     }
   };
 
   const handleItemBump = async (orderId: string, itemId: string) => {
     if (!isKitchenMode) return; // Only kitchen can bump items
+
+    const order = displayOrders.find((o) => o.id === orderId);
+    const item = order?.items.find((i: KdsOrderItem) => i.id === itemId);
+
+    // Try backend first
     try {
-      await api.patch(`/kds/orders/${orderId}/items/${itemId}/status`, { status: 'READY' });
+      await api.post(`/api/v1/kds/items/${itemId}/bump`);
     } catch {
-      // Demo
+      // Demo mode fallback — notification handled below
     }
+
+    // Update local state
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== orderId) return o;
@@ -371,6 +382,20 @@ function KdsPage() {
         };
       })
     );
+
+    // Notify mesero
+    if (order && item) {
+      useNotificationsStore.getState().addReadyItem({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        itemId: item.id,
+        itemName: item.name,
+        tableNumber: order.tableNumber,
+        tableName: order.tableName,
+        status: 'READY',
+        quantity: item.quantity,
+      });
+    }
   };
 
   const toggleFullScreen = () => {

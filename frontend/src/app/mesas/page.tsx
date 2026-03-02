@@ -39,8 +39,11 @@ import RequirePermission from '@/components/common/RequirePermission';
 import { useTablesStore } from '@/store/tables.store';
 import { useCartStore } from '@/store/cart.store';
 import { useOrdersStore } from '@/store/orders.store';
+import { useNotificationsStore, ReadyItemNotification } from '@/store/notifications.store';
+import { useSocketEvent } from '@/hooks/useSocket';
 import { cn, formatCurrency, tableStatusConfig, formatElapsedTime } from '@/lib/utils';
 import type { Table, TableStatus, Zone } from '@/types';
+import api from '@/lib/api';
 import toast from 'react-hot-toast';
 
 // ---------------------------------------------------------------------------
@@ -917,6 +920,83 @@ export default function MesasPage() {
   const [billTable, setBillTable] = useState<CanvasTable | null>(null);
   const [billOrder, setBillOrder] = useState<import('@/types').Order | null>(null);
   const [billLoading, setBillLoading] = useState(false);
+
+  // Delivery sheet state
+  const [showDeliverySheet, setShowDeliverySheet] = useState(false);
+  const [deliveryTable, setDeliveryTable] = useState<CanvasTable | null>(null);
+
+  // Notification store for ready items from KDS
+  const { readyItems, addReadyItem, markDelivered: markNotifDelivered, removeNotification } = useNotificationsStore();
+
+  // Audio ref for notification sound
+  const notifAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Listen to WebSocket events for item status changes (from backend)
+  useSocketEvent<{
+    orderId: string;
+    orderNumber: string;
+    itemId: string;
+    itemName: string;
+    tableNumber?: number;
+    tableName?: string;
+    status: string;
+    quantity?: number;
+  }>('order:item-status', (data) => {
+    if (data.status === 'READY') {
+      addReadyItem({
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        itemId: data.itemId,
+        itemName: data.itemName,
+        tableNumber: data.tableNumber,
+        tableName: data.tableName,
+        status: 'READY',
+        quantity: data.quantity,
+      });
+      toast(
+        `🔔 ${data.tableName || 'Mesa ' + data.tableNumber}: ${data.itemName} está listo!`,
+        { duration: 5000, icon: '🍽️', style: { fontWeight: 'bold' } }
+      );
+      // Play notification sound
+      try {
+        if (!notifAudioRef.current) {
+          notifAudioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2Bfnl0dHyAgYF9eXl+g4SEfnh3fIOIiIV+e3t/hYqKh4J9fH+Fioq...');
+        }
+        notifAudioRef.current.play().catch(() => {});
+      } catch { /* audio not available */ }
+    } else if (data.status === 'DELIVERED') {
+      markNotifDelivered(data.itemId);
+    }
+  });
+
+  // Also poll the notification store periodically for cross-tab/cross-page notifications
+  // (KDS page writes to the store, this page reads it)
+  const lastNotifCheckRef = useRef(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const store = useNotificationsStore.getState();
+      const newItems = store.readyItems.filter(
+        (n) => n.status === 'READY' && n.timestamp > lastNotifCheckRef.current
+      );
+      if (newItems.length > 0) {
+        lastNotifCheckRef.current = Date.now();
+        newItems.forEach((n) => {
+          toast(
+            `🔔 ${n.tableName || 'Mesa ' + n.tableNumber}: ${n.itemName} está listo!`,
+            { duration: 5000, icon: '🍽️', id: `notif-${n.id}`, style: { fontWeight: 'bold' } }
+          );
+        });
+        // Play sound for first notification
+        try {
+          if (!notifAudioRef.current) {
+            notifAudioRef.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2Bfnl0dHyAgYF9eXl+g4SEfnh3fIOIiIV+e3t/hYqKh4J9fH+Fioq...');
+          }
+          notifAudioRef.current.play().catch(() => {});
+        } catch { /* audio not available */ }
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Canvas ref for scrolling
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1926,6 +2006,19 @@ export default function MesasPage() {
                           {table.mergedFrom.length} mesas
                         </div>
                       )}
+
+                      {/* Ready items badge - notification for mesero */}
+                      {!isDimmed && (() => {
+                        const readyCount = readyItems.filter(
+                          (n) => n.status === 'READY' && n.tableNumber === table.number
+                        ).length;
+                        if (readyCount === 0) return null;
+                        return (
+                          <div className="absolute -top-3 right-0 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-0.5 animate-bounce whitespace-nowrap">
+                            🔔 {readyCount} listo{readyCount > 1 ? 's' : ''}
+                          </div>
+                        );
+                      })()}
                     </motion.div>
                   );
                 })}
@@ -2124,47 +2217,181 @@ export default function MesasPage() {
               </div>
             )}
 
-            {/* Comanda status (read-only for mesero) */}
+            {/* Comanda status with delivery actions */}
             {selectedTable.status === 'OCCUPIED' && (() => {
               // Try multiple sources to find the order
               const order: import('@/types').Order | undefined = activeOrders.find((o) => o.id === selectedTable.currentOrderId)
                 || activeOrders.find((o) => o.tableId === selectedTable.id)
                 || (storeTables.find((t) => t.id === selectedTable.id) as any)?.currentOrder; // eslint-disable-line
-              if (!order || !order.items || order.items.length === 0) return null;
-              const statusStyles: Record<string, { bg: string; text: string; label: string }> = {
-                PENDING: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Pendiente' },
-                PREPARING: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Preparando' },
-                READY: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Listo' },
-                SERVED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Servido' },
+
+              // Get ready notifications for this table
+              const tableReadyNotifs = readyItems.filter(
+                (n) => n.tableNumber === selectedTable.number
+              );
+              const readyNotifs = tableReadyNotifs.filter((n) => n.status === 'READY');
+              const deliveredNotifs = tableReadyNotifs.filter((n) => n.status === 'DELIVERED');
+
+              // Merge: use order items if available, enhanced with notification statuses
+              const hasOrder = order && order.items && order.items.length > 0;
+              const hasNotifs = tableReadyNotifs.length > 0;
+
+              if (!hasOrder && !hasNotifs) return null;
+
+              const statusStyles: Record<string, { bg: string; text: string; label: string; icon: string }> = {
+                PENDING: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Pendiente', icon: '⏳' },
+                PREPARING: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Preparando', icon: '🟡' },
+                READY: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: 'Listo', icon: '🟢' },
+                DELIVERED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Entregado', icon: '✅' },
+                SERVED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Servido', icon: '✅' },
               };
+
+              // Resolve item status: prefer notification status if available
+              const getItemStatus = (itemId: string, originalStatus: string) => {
+                const notif = tableReadyNotifs.find((n) => n.itemId === itemId);
+                if (notif) return notif.status;
+                return originalStatus;
+              };
+
+              const handleDeliverItem = async (itemId: string) => {
+                // Try backend first
+                try {
+                  await api.post(`/api/v1/kds/items/${itemId}/deliver`);
+                } catch {
+                  // Demo mode fallback
+                }
+                // Update notification store
+                markNotifDelivered(itemId);
+                toast.success('Item entregado ✅', { duration: 1500 });
+              };
+
+              const handleDeliverAll = async () => {
+                for (const notif of readyNotifs) {
+                  try {
+                    await api.post(`/api/v1/kds/items/${notif.itemId}/deliver`);
+                  } catch {
+                    // Demo mode
+                  }
+                  markNotifDelivered(notif.itemId);
+                }
+                toast.success('Todos los platos entregados ✅', { duration: 2000 });
+              };
+
+              // Count items by status
+              const totalItems = hasOrder ? order!.items.length : tableReadyNotifs.length;
+              const deliveredCount = hasOrder
+                ? order!.items.filter((i) => getItemStatus(i.id, i.status) === 'DELIVERED').length
+                : deliveredNotifs.length;
+
               return (
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-sm font-bold text-maki-dark flex items-center gap-2">
                       <ClockIcon className="w-4 h-4 text-maki-gold" />
-                      Comanda #{order.orderNumber}
+                      {hasOrder ? `Comanda #${order!.orderNumber}` : 'Platos del pedido'}
                     </span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-maki-gold/10 text-maki-gold font-bold">
-                      {order.status === 'IN_PROGRESS' ? 'En Cocina' : order.status === 'OPEN' ? 'Abierta' : order.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {totalItems > 0 && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-bold">
+                          {deliveredCount}/{totalItems} entregados
+                        </span>
+                      )}
+                      {hasOrder && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-maki-gold/10 text-maki-gold font-bold">
+                          {order!.status === 'IN_PROGRESS' ? 'En Cocina' : order!.status === 'OPEN' ? 'Abierta' : order!.status}
+                        </span>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Progress bar */}
+                  {totalItems > 0 && (
+                    <div className="mb-3">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${(deliveredCount / totalItems) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
-                    {order.items.map((item) => {
-                      const style = statusStyles[item.status] || statusStyles.PENDING;
-                      return (
-                        <div key={item.id} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="text-sm font-bold text-maki-gold w-6 text-center">{item.quantity}x</span>
-                            <span className="text-sm font-medium text-maki-dark truncate">{item.name || (item as any).product?.name || item.productId}</span>
+                    {hasOrder ? (
+                      // Show order items with enhanced statuses
+                      order!.items.map((item) => {
+                        const resolvedStatus = getItemStatus(item.id, item.status);
+                        const style = statusStyles[resolvedStatus] || statusStyles.PENDING;
+                        const isReady = resolvedStatus === 'READY';
+                        return (
+                          <div key={item.id} className={cn(
+                            'flex items-center justify-between py-2 border-b border-gray-100 last:border-0 rounded-lg px-2',
+                            isReady && 'bg-emerald-50'
+                          )}>
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-sm">{style.icon}</span>
+                              <span className="text-sm font-bold text-maki-gold w-6 text-center">{item.quantity}x</span>
+                              <span className="text-sm font-medium text-maki-dark truncate">{item.name || (item as any).product?.name || item.productId}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={cn('text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap', style.bg, style.text)}>
+                                {style.label}
+                              </span>
+                              {isReady && (
+                                <button
+                                  onClick={() => handleDeliverItem(item.id)}
+                                  className="text-xs font-bold px-3 py-1.5 bg-emerald-500 text-white rounded-full hover:bg-emerald-600 active:scale-95 transition-all touch-manipulation whitespace-nowrap"
+                                >
+                                  Entregar
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <span className={cn('text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap', style.bg, style.text)}>
-                            {style.label}
-                          </span>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    ) : (
+                      // Show notification items only (no order available)
+                      tableReadyNotifs.map((notif) => {
+                        const style = statusStyles[notif.status] || statusStyles.READY;
+                        const isReady = notif.status === 'READY';
+                        return (
+                          <div key={notif.id} className={cn(
+                            'flex items-center justify-between py-2 border-b border-gray-100 last:border-0 rounded-lg px-2',
+                            isReady && 'bg-emerald-50'
+                          )}>
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-sm">{style.icon}</span>
+                              <span className="text-sm font-bold text-maki-gold w-6 text-center">{notif.quantity || 1}x</span>
+                              <span className="text-sm font-medium text-maki-dark truncate">{notif.itemName}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className={cn('text-xs font-bold px-2 py-1 rounded-full whitespace-nowrap', style.bg, style.text)}>
+                                {style.label}
+                              </span>
+                              {isReady && (
+                                <button
+                                  onClick={() => handleDeliverItem(notif.itemId)}
+                                  className="text-xs font-bold px-3 py-1.5 bg-emerald-500 text-white rounded-full hover:bg-emerald-600 active:scale-95 transition-all touch-manipulation whitespace-nowrap"
+                                >
+                                  Entregar
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-3 text-center italic">Solo lectura · Los cambios se hacen en Cocina</p>
+
+                  {/* Deliver all button */}
+                  {readyNotifs.length > 1 && (
+                    <button
+                      onClick={handleDeliverAll}
+                      className="w-full mt-3 min-h-[44px] bg-emerald-500 text-white font-bold rounded-xl hover:bg-emerald-600 active:scale-[0.98] transition-all touch-manipulation flex items-center justify-center gap-2"
+                    >
+                      <CheckCircleIcon className="w-5 h-5" />
+                      Entregar Todo ({readyNotifs.length} platos)
+                    </button>
+                  )}
                 </div>
               );
             })()}

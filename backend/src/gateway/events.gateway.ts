@@ -115,6 +115,21 @@ export class EventsGateway
     this.server.to(`branch:${branchId}`).emit('kds:item_bumped', item);
   }
 
+  // Order item status change (notifies waiters when items are READY or DELIVERED)
+  emitOrderItemStatus(branchId: string, data: {
+    orderId: string;
+    orderNumber: string;
+    itemId: string;
+    itemName: string;
+    tableNumber?: number;
+    tableName?: string;
+    status: string;
+    quantity?: number;
+  }) {
+    this.server.to(`branch:${branchId}`).emit('order:item-status', data);
+    this.logger.log(`Item status → ${data.status}: ${data.itemName} (Order #${data.orderNumber}, Table ${data.tableName})`);
+  }
+
   // Alert events
   emitNewAlert(branchId: string, alert: any) {
     this.server.to(`branch:${branchId}`).emit('alert:new', alert);

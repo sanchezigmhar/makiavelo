@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { EventsGateway } from '../../gateway/events.gateway';
 import { OrderItemStatus } from '@prisma/client';
 
 @Injectable()
 export class KdsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventsGateway: EventsGateway,
+  ) {}
 
   async getItemsByStation(station: string, branchId?: string) {
     const where: any = {
@@ -120,6 +124,21 @@ export class KdsService {
       },
     });
 
+    // Notify waiters via WebSocket that this item is READY
+    const branchId = item.order?.branchId;
+    if (branchId) {
+      this.eventsGateway.emitOrderItemStatus(branchId, {
+        orderId: updatedItem.order.id,
+        orderNumber: updatedItem.order.orderNumber,
+        itemId: updatedItem.id,
+        itemName: updatedItem.product?.name || 'Item',
+        tableNumber: updatedItem.order.table?.number,
+        tableName: updatedItem.order.table?.name,
+        status: 'READY',
+        quantity: updatedItem.quantity,
+      });
+    }
+
     // Check if all items in the order are ready
     const pendingItems = await this.prisma.orderItem.count({
       where: {
@@ -141,13 +160,14 @@ export class KdsService {
   async markDelivered(itemId: string) {
     const item = await this.prisma.orderItem.findUnique({
       where: { id: itemId },
+      include: { order: true },
     });
 
     if (!item) {
       throw new NotFoundException('Item no encontrado');
     }
 
-    return this.prisma.orderItem.update({
+    const updatedItem = await this.prisma.orderItem.update({
       where: { id: itemId },
       data: {
         status: OrderItemStatus.DELIVERED,
@@ -166,6 +186,23 @@ export class KdsService {
         },
       },
     });
+
+    // Notify via WebSocket that this item has been delivered
+    const branchId = item.order?.branchId;
+    if (branchId) {
+      this.eventsGateway.emitOrderItemStatus(branchId, {
+        orderId: updatedItem.order.id,
+        orderNumber: updatedItem.order.orderNumber,
+        itemId: updatedItem.id,
+        itemName: updatedItem.product?.name || 'Item',
+        tableNumber: updatedItem.order.table?.number,
+        tableName: updatedItem.order.table?.name,
+        status: 'DELIVERED',
+        quantity: updatedItem.quantity,
+      });
+    }
+
+    return updatedItem;
   }
 
   async recallItem(itemId: string) {
