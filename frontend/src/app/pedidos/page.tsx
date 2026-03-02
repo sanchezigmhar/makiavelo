@@ -214,6 +214,23 @@ export default function PedidosPage() {
       //  but we also call updateTableStatus to ensure the store is refreshed)
       if (tableId) {
         await updateTableStatus(tableId, 'OCCUPIED');
+
+        // For merged tables (id starts with "merged-"), persist the OCCUPIED state
+        // and order info so the mesas page can read it after navigation
+        if (tableId.startsWith('merged-')) {
+          try {
+            const key = 'makiavelo-merged-table-orders';
+            const existing = JSON.parse(localStorage.getItem(key) || '{}');
+            existing[tableId] = {
+              status: 'OCCUPIED',
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              occupiedAt: new Date().toISOString(),
+              orderTotal: order.total || 0,
+            };
+            localStorage.setItem(key, JSON.stringify(existing));
+          } catch { /* ignore */ }
+        }
       }
 
       const orderNum = order.orderNumber;

@@ -332,6 +332,7 @@ function TableShapeSVG({
   isDimmed,
   isMergeTarget,
   isMergedTable,
+  colorOverride,
 }: {
   table: CanvasTable;
   isEditMode: boolean;
@@ -340,9 +341,10 @@ function TableShapeSVG({
   isDimmed: boolean;
   isMergeTarget?: boolean;
   isMergedTable?: boolean;
+  colorOverride?: string;
 }) {
   const { w, h } = getTableDimensions(table.shape, table.capacity);
-  const color = STATUS_COLORS[table.status];
+  const color = colorOverride || STATUS_COLORS[table.status];
   const isOccupied = table.status === 'OCCUPIED';
 
   const chairSize = 10;
@@ -1134,9 +1136,26 @@ export default function MesasPage() {
           };
         });
 
-      // Re-add merged tables from the ref
+      // Re-add merged tables from the ref, applying persisted order state
+      let mergedOrderStates: Record<string, { status: string; orderId?: string; orderNumber?: string; occupiedAt?: string; orderTotal?: number }> = {};
+      try {
+        const saved = localStorage.getItem('makiavelo-merged-table-orders');
+        if (saved) mergedOrderStates = JSON.parse(saved);
+      } catch { /* ignore */ }
+
       existingMerged.forEach((mt) => {
-        demoCanvas.push(mt);
+        const orderState = mergedOrderStates[mt.id];
+        if (orderState && orderState.status === 'OCCUPIED') {
+          demoCanvas.push({
+            ...mt,
+            status: 'OCCUPIED' as TableStatus,
+            occupiedAt: orderState.occupiedAt,
+            orderTotal: orderState.orderTotal,
+            currentOrderId: orderState.orderId,
+          });
+        } else {
+          demoCanvas.push(mt);
+        }
       });
 
       console.log('[MESAS] Demo mode rebuild: built', demoCanvas.length, 'canvasTables from', storeTables.length, 'storeTables. mergedRef:', existingMerged.length, 'merged, mergedOriginalIds:', Array.from(mergedOriginalIds));
@@ -1659,10 +1678,51 @@ export default function MesasPage() {
           return updated;
         })
       );
+
+      // Clean up merged table order state from localStorage
+      if (table.id.startsWith('merged-')) {
+        try {
+          const key = 'makiavelo-merged-table-orders';
+          const existing = JSON.parse(localStorage.getItem(key) || '{}');
+          if (newStatus === 'AVAILABLE') {
+            delete existing[table.id];
+          } else {
+            existing[table.id] = {
+              ...existing[table.id],
+              status: newStatus,
+              occupiedAt: newStatus === 'OCCUPIED' ? new Date().toISOString() : existing[table.id]?.occupiedAt,
+            };
+          }
+          localStorage.setItem(key, JSON.stringify(existing));
+        } catch { /* ignore */ }
+
+        // Also update the merged tables ref so it persists across navigation
+        const updatedMerged = activeMergedTablesRef.current.map((mt) => {
+          if (mt.id !== table.id) return mt;
+          const updated = { ...mt, status: newStatus };
+          if (newStatus === 'AVAILABLE') {
+            updated.occupiedAt = undefined;
+            updated.orderTotal = undefined;
+            updated.serverName = undefined;
+            updated.currentOrderId = undefined;
+          }
+          return updated;
+        });
+        setMergedTables(updatedMerged);
+      }
+
+      // Also clear notifications for this table when set to AVAILABLE
+      if (newStatus === 'AVAILABLE') {
+        const notifs = useNotificationsStore.getState().readyItems.filter(
+          (n) => n.tableNumber === table.number
+        );
+        notifs.forEach((n) => removeNotification(n.id));
+      }
+
       setShowTableSheet(false);
       toast.success(`Mesa ${table.number}: ${STATUS_LABELS[newStatus]}`);
     },
-    []
+    [setMergedTables, removeNotification] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const handleAddTable = useCallback(
@@ -1812,6 +1872,14 @@ export default function MesasPage() {
               <span className="font-bold text-maki-dark">{count}</span>
             </div>
           ))}
+          {/* Ready items indicator */}
+          {readyItems.filter((n) => n.status === 'READY').length > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm text-sm whitespace-nowrap animate-pulse">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-emerald-600" />
+              <span className="text-emerald-700 font-semibold">Comida Lista</span>
+              <span className="font-bold text-emerald-800">{readyItems.filter((n) => n.status === 'READY').length}</span>
+            </div>
+          )}
         </div>
 
         {/* Reservation assignment banner */}
@@ -1979,6 +2047,13 @@ export default function MesasPage() {
                         isDimmed={isDimmed}
                         isMergeTarget={false}
                         isMergedTable={!!table.isMerged}
+                        colorOverride={
+                          // Green when food is READY for this table
+                          table.status === 'OCCUPIED' &&
+                          readyItems.some((n) => n.status === 'READY' && n.tableNumber === table.number)
+                            ? '#059669' // Emerald-600: food is ready!
+                            : undefined
+                        }
                       />
 
                       {/* Elapsed time badge for occupied */}
