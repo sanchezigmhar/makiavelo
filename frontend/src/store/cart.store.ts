@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import type { CartItem, CartItemModifier, CourseType } from '@/types';
 import { generateTempId } from '@/lib/utils';
 
+export interface ExistingOrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  status: string;
+  notes?: string;
+}
+
 interface CartState {
   items: CartItem[];
   tableId: string | null;
@@ -10,6 +19,8 @@ interface CartState {
   guestCount: number;
   notes: string;
   customerId: string | null;
+  existingOrderId: string | null;
+  existingItems: ExistingOrderItem[];
 
   // Computed
   subtotal: number;
@@ -31,6 +42,7 @@ interface CartState {
   decrementQuantity: (tempId: string) => void;
   updateItemNotes: (tempId: string, notes: string) => void;
   setTable: (tableId: string, tableName: string) => void;
+  setExistingOrder: (orderId: string, items: ExistingOrderItem[]) => void;
   setOrderType: (type: 'DINE_IN' | 'TAKEOUT' | 'DELIVERY') => void;
   setGuestCount: (count: number) => void;
   setNotes: (notes: string) => void;
@@ -59,6 +71,8 @@ export const useCartStore = create<CartState>((set, get) => ({
   guestCount: 1,
   notes: '',
   customerId: null,
+  existingOrderId: null,
+  existingItems: [],
 
   get subtotal() {
     return get().items.reduce((sum, item) => {
@@ -158,6 +172,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   },
 
   setTable: (tableId, tableName) => set({ tableId, tableName }),
+  setExistingOrder: (orderId, items) => set({ existingOrderId: orderId, existingItems: items }),
   setOrderType: (type) => set({ orderType: type }),
   setGuestCount: (count) => set({ guestCount: Math.max(1, count) }),
   setNotes: (notes) => set({ notes }),
@@ -172,6 +187,8 @@ export const useCartStore = create<CartState>((set, get) => ({
       guestCount: 1,
       notes: '',
       customerId: null,
+      existingOrderId: null,
+      existingItems: [],
     }),
 
   getCartPayload: () => {

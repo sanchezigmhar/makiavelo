@@ -48,7 +48,7 @@ const presetNotes = [
 export default function PedidosPage() {
   const router = useRouter();
   const cart = useCartStore();
-  const { createOrder, sendToKitchen } = useOrdersStore();
+  const { createOrder, sendToKitchen, addItemsToOrder } = useOrdersStore();
   const { updateTableStatus } = useTablesStore();
 
   const [categories, setCategories] = useState<Category[]>([]);
@@ -204,43 +204,69 @@ export default function PedidosPage() {
     if (cart.items.length === 0) return;
     const tableId = cart.tableId;
     const tableName = cart.tableName;
-    const payload = cart.getCartPayload();
-    const order = await createOrder(payload);
-    if (order) {
-      await sendToKitchen(order.id);
+    const existingOrderId = cart.existingOrderId;
 
-      // Update table status to OCCUPIED on the backend
-      // (The backend's createOrder already sets the table to OCCUPIED,
-      //  but we also call updateTableStatus to ensure the store is refreshed)
-      if (tableId) {
-        await updateTableStatus(tableId, 'OCCUPIED');
+    if (existingOrderId) {
+      // ---- ADD ITEMS TO EXISTING ORDER ----
+      const newItems = cart.items.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        notes: item.notes || undefined,
+        modifiers: item.modifiers.length > 0
+          ? item.modifiers.map((m) => ({ modifierOptionId: m.modifierId }))
+          : undefined,
+      }));
 
-        // For merged tables (id starts with "merged-"), persist the OCCUPIED state
-        // and order info so the mesas page can read it after navigation
-        if (tableId.startsWith('merged-')) {
-          try {
-            const key = 'makiavelo-merged-table-orders';
-            const existing = JSON.parse(localStorage.getItem(key) || '{}');
-            existing[tableId] = {
-              status: 'OCCUPIED',
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              occupiedAt: new Date().toISOString(),
-              orderTotal: order.total || 0,
-            };
-            localStorage.setItem(key, JSON.stringify(existing));
-          } catch { /* ignore */ }
-        }
+      try {
+        await addItemsToOrder(existingOrderId, newItems);
+        await sendToKitchen(existingOrderId);
+      } catch {
+        // Demo mode: items added locally via store
       }
 
-      const orderNum = order.orderNumber;
+      const itemCount = cart.items.reduce((s, i) => s + i.quantity, 0);
       cart.clearCart();
-      toast.success(`Orden #${orderNum} enviada a cocina · ${tableName || 'Mesa'}`, {
+      toast.success(`${itemCount} item(s) agregados a la orden · ${tableName || 'Mesa'}`, {
         duration: 2500,
-        icon: '🍣',
+        icon: '➕',
       });
-      // Navigate back to mesas
       router.push('/mesas');
+    } else {
+      // ---- CREATE NEW ORDER ----
+      const payload = cart.getCartPayload();
+      const order = await createOrder(payload);
+      if (order) {
+        await sendToKitchen(order.id);
+
+        // Update table status to OCCUPIED on the backend
+        if (tableId) {
+          await updateTableStatus(tableId, 'OCCUPIED');
+
+          // For merged tables, persist the OCCUPIED state
+          if (tableId.startsWith('merged-')) {
+            try {
+              const key = 'makiavelo-merged-table-orders';
+              const existing = JSON.parse(localStorage.getItem(key) || '{}');
+              existing[tableId] = {
+                status: 'OCCUPIED',
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                occupiedAt: new Date().toISOString(),
+                orderTotal: order.total || 0,
+              };
+              localStorage.setItem(key, JSON.stringify(existing));
+            } catch { /* ignore */ }
+          }
+        }
+
+        const orderNum = order.orderNumber;
+        cart.clearCart();
+        toast.success(`Orden #${orderNum} enviada a cocina · ${tableName || 'Mesa'}`, {
+          duration: 2500,
+          icon: '🍣',
+        });
+        router.push('/mesas');
+      }
     }
   };
 
@@ -257,8 +283,8 @@ export default function PedidosPage() {
     <RequirePermission permission="orders">
     <MainLayout>
       <Header
-        title="Toma de Pedido"
-        subtitle={cart.tableName ? `Mesa: ${cart.tableName}` : 'Sin mesa asignada'}
+        title={cart.existingOrderId ? 'Agregar a Pedido' : 'Toma de Pedido'}
+        subtitle={cart.tableName ? `Mesa: ${cart.tableName}${cart.existingOrderId ? ' · Agregando items' : ''}` : 'Sin mesa asignada'}
         actions={
           <Button
             variant="ghost"
@@ -374,7 +400,54 @@ export default function PedidosPage() {
 
           {/* Cart items */}
           <div className="flex-1 overflow-y-auto scrollbar-thin px-4 py-2">
-            {cart.items.length === 0 ? (
+            {/* Existing order items (already sent to kitchen) */}
+            {cart.existingItems.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Ya en cocina</span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+                {cart.existingItems.map((item) => {
+                  const statusColors: Record<string, string> = {
+                    PENDING: 'text-gray-500',
+                    PREPARING: 'text-amber-600',
+                    READY: 'text-fuchsia-600',
+                    DELIVERED: 'text-blue-600',
+                  };
+                  const statusLabels: Record<string, string> = {
+                    PENDING: 'Pendiente',
+                    PREPARING: 'Preparando',
+                    READY: 'Listo',
+                    DELIVERED: 'Entregado',
+                  };
+                  return (
+                    <div key={item.id} className="py-2 border-b border-gray-50 last:border-0 opacity-70">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="text-sm font-bold text-maki-gold w-6 text-center">{item.quantity}x</span>
+                          <span className="text-sm font-medium text-maki-dark truncate">{item.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">{formatCurrency(item.unitPrice * item.quantity)}</span>
+                          <span className={cn('text-[10px] font-bold', statusColors[item.status] || 'text-gray-500')}>
+                            {statusLabels[item.status] || item.status}
+                          </span>
+                        </div>
+                      </div>
+                      {item.notes && (
+                        <p className="text-xs text-amber-500 ml-8 mt-0.5">* {item.notes}</p>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex items-center gap-2 mt-2 mb-1">
+                  <span className="text-xs font-bold text-maki-gold uppercase tracking-wider">Nuevos items</span>
+                  <div className="flex-1 h-px bg-maki-gold/30" />
+                </div>
+              </div>
+            )}
+
+            {cart.items.length === 0 && cart.existingItems.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-maki-gray">
                 <ShoppingCartIcon className="w-12 h-12 mb-3 opacity-30" />
                 <p className="text-touch-base">Orden vacia</p>
@@ -455,9 +528,20 @@ export default function PedidosPage() {
           {/* Cart footer */}
           {cart.items.length > 0 && (
             <div className="px-4 py-4 border-t border-gray-100 space-y-3">
-              {/* Subtotal */}
+              {/* Existing order total */}
+              {cart.existingItems.length > 0 && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Items anteriores</span>
+                  <span className="text-gray-400 font-medium">
+                    {formatCurrency(cart.existingItems.reduce((s, i) => s + i.unitPrice * i.quantity, 0))}
+                  </span>
+                </div>
+              )}
+              {/* Subtotal of new items */}
               <div className="flex items-center justify-between">
-                <span className="text-maki-gray font-medium">Subtotal</span>
+                <span className="text-maki-gray font-medium">
+                  {cart.existingOrderId ? 'Nuevos items' : 'Subtotal'}
+                </span>
                 <span className="text-touch-xl font-bold text-maki-dark">
                   {formatCurrency(subtotal)}
                 </span>
@@ -471,7 +555,7 @@ export default function PedidosPage() {
                 icon={<PaperAirplaneIcon className="w-6 h-6" />}
                 onClick={handleSendToKitchen}
               >
-                Enviar a Cocina
+                {cart.existingOrderId ? `Agregar ${itemCount} item(s) a la Orden` : 'Enviar a Cocina'}
               </Button>
             </div>
           )}

@@ -867,7 +867,7 @@ function EditTablePanel({
 export default function MesasPage() {
   const router = useRouter();
   const { tables: storeTables, zones, selectedZone, isLoading, fetchTables, fetchZones, setSelectedZone, updateTableStatus } = useTablesStore();
-  const { setTable } = useCartStore();
+  const { setTable, setExistingOrder } = useCartStore();
   const { activeOrders, fetchOrder, fetchActiveOrders, fetchOrdersByTable, currentOrder } = useOrdersStore();
 
   // ---------------------------------------------------------------------------
@@ -1554,12 +1554,42 @@ export default function MesasPage() {
   );
 
   const handleOpenOrder = useCallback(
-    (table: CanvasTable) => {
+    async (table: CanvasTable) => {
       setTable(table.id, table.name);
       setShowTableSheet(false);
+
+      // If table is OCCUPIED and has an existing order, load items into the cart
+      if (table.status === 'OCCUPIED' && table.currentOrderId) {
+        let existingOrder: import('@/types').Order | null = null;
+
+        // Try to fetch from backend or memory
+        try {
+          existingOrder = await fetchOrder(table.currentOrderId);
+        } catch { /* ignore */ }
+
+        if (!existingOrder) {
+          existingOrder = activeOrders.find((o) => o.id === table.currentOrderId)
+            || activeOrders.find((o) => o.tableId === table.id)
+            || (storeTables.find((t) => t.id === table.id) as any)?.currentOrder // eslint-disable-line
+            || null;
+        }
+
+        if (existingOrder && existingOrder.items && existingOrder.items.length > 0) {
+          const mapped = existingOrder.items.map((it: any) => ({ // eslint-disable-line
+            id: it.id,
+            name: it.name || it.product?.name || it.productId,
+            quantity: it.quantity,
+            unitPrice: it.unitPrice || 0,
+            status: it.status || 'PENDING',
+            notes: it.notes,
+          }));
+          setExistingOrder(existingOrder.id, mapped);
+        }
+      }
+
       router.push('/pedidos');
     },
-    [setTable, router]
+    [setTable, setExistingOrder, router, fetchOrder, activeOrders, storeTables]
   );
 
   const handleViewOrder = useCallback(
