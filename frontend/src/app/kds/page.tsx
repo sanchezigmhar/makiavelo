@@ -259,15 +259,25 @@ function KdsPage() {
           tableNumber: 0,
           tableName: o.tableId
             ? (() => {
-                try {
-                  const saved = localStorage.getItem('makiavelo-table-layout');
-                  if (saved) {
-                    const tables = JSON.parse(saved);
-                    const t = tables.find((t: Record<string, unknown>) => t.id === o.tableId);
-                    if (t) return t.name as string;
-                  }
-                } catch { /* noop */ }
-                return 'Mesa';
+                // Try multiple localStorage keys for table name resolution
+                const keys = ['makiavelo-table-layout', 'makiavelo-table-positions'];
+                for (const key of keys) {
+                  try {
+                    const saved = localStorage.getItem(key);
+                    if (saved) {
+                      const tables = JSON.parse(saved);
+                      if (Array.isArray(tables)) {
+                        const t = tables.find((t: Record<string, unknown>) => t.id === o.tableId);
+                        if (t && t.name) return t.name as string;
+                      } else if (typeof tables === 'object' && tables[o.tableId!]) {
+                        return `Mesa`; // position data only, no name
+                      }
+                    }
+                  } catch { /* noop */ }
+                }
+                // Fallback: extract table number from tableId
+                const num = o.tableId?.replace(/\D/g, '');
+                return num ? `Mesa ${num}` : 'Mesa';
               })()
             : 'Para Llevar',
           items: o.items.map((item) => ({
@@ -325,103 +335,92 @@ function KdsPage() {
     );
   }, [roleFilteredOrders, selectedStation]);
 
-  // Helper: get the real working list of orders (handles case where orders=[] but demoOrders shown)
-  const getWorkingOrders = useCallback(() => {
-    return orders.length > 0 ? orders : demoOrders;
-  }, [orders, demoOrders]);
+  // -------------------------------------------------------------------------
+  // BUMP HANDLERS — the single source of truth for all displayed orders
+  // is `displayOrders`. But `setOrders` only controls `orders` state.
+  // Orders can come from 3 sources:
+  //   1. `orders` state (demo data or API data)
+  //   2. `demoOrders` (fallback when orders=[])
+  //   3. `storeKdsOrders` (from orders Zustand store, e.g. new orders from pedidos)
+  //
+  // To ensure bump always works, we build a FULL list merging all sources,
+  // modify it, and set it as the new `orders` state.
+  // -------------------------------------------------------------------------
+
+  const getAllOrders = useCallback((): KdsOrder[] => {
+    // Build the same merged list as displayOrders, but return a writable copy
+    const base = orders.length > 0 ? [...orders] : [...demoOrders];
+    const existingIds = new Set(base.map((o) => o.id));
+    const fromStore = storeKdsOrders.filter((o) => !existingIds.has(o.id));
+    return [...fromStore, ...base];
+  }, [orders, demoOrders, storeKdsOrders]);
 
   const handleBump = async (orderId: string) => {
-    if (!isKitchenMode) return; // Only kitchen can bump
+    if (!isKitchenMode) return;
 
-    const workingOrders = getWorkingOrders();
-    const order = workingOrders.find((o) => o.id === orderId)
-      || storeKdsOrders.find((o) => o.id === orderId);
+    const allOrders = getAllOrders();
+    const order = allOrders.find((o) => o.id === orderId);
     if (!order) return;
 
-    const newStatus = order.status === 'NEW' ? 'PREPARING' : 'READY';
+    const newStatus = order.status === 'NEW' || order.status === 'LATE' ? 'PREPARING' : 'READY';
 
     if (newStatus === 'READY') {
       // Bump ALL items in this order to READY via backend
       const pendingItems = order.items.filter((i: KdsOrderItem) => i.status !== 'READY');
-
       for (const item of pendingItems) {
-        try {
-          await api.post(`/api/v1/kds/items/${item.id}/bump`);
-        } catch {
-          // Will handle in demo mode below
-        }
+        try { await api.post(`/api/v1/kds/items/${item.id}/bump`); } catch { /* demo */ }
       }
 
-      // Notify mesero for each item (demo mode or as fallback)
+      // Notify mesero for each item
       order.items.forEach((item: KdsOrderItem) => {
         useNotificationsStore.getState().addReadyItem({
-          orderId: order.id,
-          orderNumber: order.orderNumber,
-          itemId: item.id,
-          itemName: item.name,
-          tableNumber: order.tableNumber,
-          tableName: order.tableName,
-          status: 'READY',
-          quantity: item.quantity,
+          orderId: order.id, orderNumber: order.orderNumber,
+          itemId: item.id, itemName: item.name,
+          tableNumber: order.tableNumber, tableName: order.tableName,
+          status: 'READY', quantity: item.quantity,
         });
       });
 
       toast.success(`Orden #${order.orderNumber} LISTA`, { duration: 2000 });
-      // Remove from working orders
-      const updated = workingOrders.filter((o) => o.id !== orderId);
-      setOrders(updated);
+      // Remove this order from the full list and save
+      setOrders(allOrders.filter((o) => o.id !== orderId));
     } else {
-      // NEW → PREPARING: update working orders
-      const updated = workingOrders.map((o) =>
+      // NEW/LATE → PREPARING
+      setOrders(allOrders.map((o) =>
         o.id === orderId ? { ...o, status: 'PREPARING' as KdsOrder['status'] } : o
-      );
-      setOrders(updated);
+      ));
       toast(`Preparando orden #${order.orderNumber}`, { icon: '🔥', duration: 1500 });
     }
   };
 
   const handleItemBump = async (orderId: string, itemId: string) => {
-    if (!isKitchenMode) return; // Only kitchen can bump items
+    if (!isKitchenMode) return;
 
-    const workingOrders = getWorkingOrders();
-    const order = workingOrders.find((o) => o.id === orderId)
-      || storeKdsOrders.find((o) => o.id === orderId);
+    const allOrders = getAllOrders();
+    const order = allOrders.find((o) => o.id === orderId);
     const item = order?.items.find((i: KdsOrderItem) => i.id === itemId);
 
-    // Try backend first
-    try {
-      await api.post(`/api/v1/kds/items/${itemId}/bump`);
-    } catch {
-      // Demo mode fallback — notification handled below
-    }
+    // Try backend
+    try { await api.post(`/api/v1/kds/items/${itemId}/bump`); } catch { /* demo */ }
 
-    // Update working orders
-    const updated = workingOrders.map((o) => {
+    // Update item to READY; if all items ready, mark order as READY
+    const updated = allOrders.map((o) => {
       if (o.id !== orderId) return o;
       const updatedItems = o.items.map((i: KdsOrderItem) =>
         i.id === itemId ? { ...i, status: 'READY' as const } : i
       );
-      // If all items are READY, mark order as READY
       const allReady = updatedItems.every((i: KdsOrderItem) => i.status === 'READY');
-      return {
-        ...o,
-        items: updatedItems,
-        status: allReady ? 'READY' as const : o.status,
-      };
+      return { ...o, items: updatedItems, status: allReady ? 'READY' as const : o.status };
     });
     setOrders(updated);
 
     // Notify mesero
     if (order && item) {
       useNotificationsStore.getState().addReadyItem({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        itemId: item.id,
-        itemName: item.name,
-        tableNumber: order.tableNumber,
-        tableName: order.tableName,
-        status: 'READY',
-        quantity: item.quantity,
+        orderId: order.id, orderNumber: order.orderNumber,
+        itemId: item.id, itemName: item.name,
+        tableNumber: order.tableNumber, tableName: order.tableName,
+        status: 'READY', quantity: item.quantity,
       });
       toast.success(`${item.name} LISTO!`, { icon: '✅', duration: 1500 });
     }

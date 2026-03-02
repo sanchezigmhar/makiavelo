@@ -177,6 +177,25 @@ function CobroPage() {
   // Resolve tableId — prefer URL param (it's the actual table the user clicked)
   const resolvedTableId = searchParams?.get('tableId') || order.tableId || null;
 
+  // Clean up localStorage entries for a table after payment
+  const cleanupTableStorage = (tId: string | null) => {
+    if (!tId) return;
+    try {
+      // Clean makiavelo-table-orders
+      const tableOrders = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
+      if (tableOrders[tId]) {
+        delete tableOrders[tId];
+        localStorage.setItem('makiavelo-table-orders', JSON.stringify(tableOrders));
+      }
+      // Clean makiavelo-merged-table-orders
+      const mergedOrders = JSON.parse(localStorage.getItem('makiavelo-merged-table-orders') || '{}');
+      if (mergedOrders[tId]) {
+        delete mergedOrders[tId];
+        localStorage.setItem('makiavelo-merged-table-orders', JSON.stringify(mergedOrders));
+      }
+    } catch { /* ignore */ }
+  };
+
   const handleProcessPayment = async () => {
     setIsProcessing(true);
     // Map frontend payment method to backend enum
@@ -204,6 +223,7 @@ function CobroPage() {
       if (resolvedTableId) {
         try { await updateTableStatus(resolvedTableId, 'AVAILABLE'); } catch { /* backend might have set it to CLEANING */ }
       }
+      cleanupTableStorage(resolvedTableId);
       toast.success('Pago procesado');
       setShowSuccess(true);
     } catch (err) {
@@ -213,6 +233,7 @@ function CobroPage() {
       if (resolvedTableId) {
         await updateTableStatus(resolvedTableId, 'AVAILABLE');
       }
+      cleanupTableStorage(resolvedTableId);
       toast.success('Pago procesado');
       setShowSuccess(true);
     }

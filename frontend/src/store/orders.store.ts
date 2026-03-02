@@ -30,6 +30,9 @@ interface OrdersState {
     notes?: string;
     items: {
       productId: string;
+      name?: string;
+      unitPrice?: number;
+      courseType?: string;
       quantity: number;
       notes?: string;
       modifiers?: { modifierOptionId: string }[];
@@ -121,36 +124,40 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       }));
       return data;
     } catch {
-      // Demo mode: create a local order
+      // Demo mode: create a local order with real names and prices from cart
       demoOrderCounter++;
       const now = new Date().toISOString();
-      const demoItems: OrderItem[] = orderData.items.map((item, idx) => ({
-        id: `oi_${Date.now()}_${idx}`,
-        orderId: `demo_${demoOrderCounter}`,
-        productId: item.productId,
-        name: item.productId, // will be replaced by cart data in pedidos
-        quantity: item.quantity,
-        unitPrice: 0,
-        totalPrice: 0,
-        courseType: 'PLATO_FUERTE' as const,
-        status: 'PENDING' as const,
-        sortOrder: idx,
-        notes: item.notes,
-      }));
+      const demoItems: OrderItem[] = orderData.items.map((item, idx) => {
+        const price = item.unitPrice || 0;
+        return {
+          id: `oi_${Date.now()}_${idx}`,
+          orderId: `demo_${demoOrderCounter}`,
+          productId: item.productId,
+          name: item.name || item.productId,
+          quantity: item.quantity,
+          unitPrice: price,
+          totalPrice: price * item.quantity,
+          courseType: (item.courseType || 'PLATO_FUERTE') as OrderItem['courseType'],
+          status: 'PENDING' as const,
+          sortOrder: idx,
+          notes: item.notes,
+        };
+      });
+      const demoSubtotal = demoItems.reduce((s, i) => s + i.totalPrice, 0);
       const demoOrder: Order = {
         id: `demo_${demoOrderCounter}`,
-        orderNumber: `${demoOrderCounter}`,
+        orderNumber: `${150 + demoOrderCounter}`,
         type: (orderData.type || 'DINE_IN') as Order['type'],
         status: 'OPEN',
         tableId: orderData.tableId,
         userId: 'demo-user',
         branchId: 'branch-1',
         items: demoItems,
-        subtotal: 0,
+        subtotal: demoSubtotal,
         taxAmount: 0,
         discountAmount: 0,
         tipAmount: 0,
-        total: 0,
+        total: demoSubtotal,
         guestCount: orderData.guestCount,
         notes: orderData.notes,
         createdAt: now,

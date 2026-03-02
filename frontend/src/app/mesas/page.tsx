@@ -1654,36 +1654,46 @@ export default function MesasPage() {
       setBillLoading(true);
       setShowBillSheet(true);
 
-      console.log('[VER_CUENTA] === Starting for table:', table.name, 'id:', table.id, 'currentOrderId:', table.currentOrderId);
-
       let foundOrder: import('@/types').Order | null = null;
 
-      // Strategy 1: Fetch order by ID from backend (if we have a valid UUID orderId)
-      if (table.currentOrderId && table.currentOrderId.length > 10) {
-        console.log('[VER_CUENTA] Strategy 1: fetchOrder by ID', table.currentOrderId);
+      // Strategy 1: Fetch order by ID from backend (any length ID)
+      if (table.currentOrderId) {
         try {
           const order = await fetchOrder(table.currentOrderId);
-          console.log('[VER_CUENTA] Strategy 1 result:', order ? `Order #${order.orderNumber} items=${order.items?.length}` : 'null');
-          if (order) {
-            foundOrder = order;
-          }
-        } catch (err) {
-          console.error('[VER_CUENTA] Strategy 1 error:', err);
-        }
-      } else {
-        console.log('[VER_CUENTA] Strategy 1 skipped: no valid currentOrderId');
+          if (order && order.items?.length > 0) foundOrder = order;
+        } catch { /* ignore */ }
       }
 
-      // Strategy 2: Fetch active orders for this table from backend by tableId
+      // Strategy 2: Look up orderId from localStorage (persisted when order was created)
       if (!foundOrder) {
-        console.log('[VER_CUENTA] Strategy 2: fetchOrdersByTable', table.id);
+        try {
+          const savedLinks = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
+          const savedLink = savedLinks[table.id];
+          if (savedLink?.orderId) {
+            // First check in memory
+            foundOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
+            // Then try backend
+            if (!foundOrder) {
+              try { foundOrder = await fetchOrder(savedLink.orderId); } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Strategy 3: Check activeOrders in memory by tableId or currentOrderId
+      if (!foundOrder) {
+        foundOrder = activeOrders.find((o) => o.tableId === table.id)
+          || (table.currentOrderId ? activeOrders.find((o) => o.id === table.currentOrderId) : null)
+          || null;
+      }
+
+      // Strategy 4: Fetch active orders for this table from backend by tableId
+      if (!foundOrder) {
         try {
           const tableOrders = await fetchOrdersByTable(table.id);
-          console.log('[VER_CUENTA] Strategy 2 result:', tableOrders.length, 'orders');
           if (tableOrders.length > 0) {
             foundOrder = tableOrders[0];
-            console.log('[VER_CUENTA] Strategy 2 found:', `Order #${foundOrder?.orderNumber} items=${foundOrder?.items?.length}`);
-            // Update the canvas table with the real order ID
+            // Update canvas table with real order ID
             if (foundOrder) {
               setCanvasTables((prev) =>
                 prev.map((ct) =>
@@ -1694,40 +1704,16 @@ export default function MesasPage() {
               );
             }
           }
-        } catch (err) {
-          console.error('[VER_CUENTA] Strategy 2 error:', err);
-        }
+        } catch { /* ignore */ }
       }
 
-      // Strategy 3: Check activeOrders in memory
+      // Strategy 5: Check storeTables for embedded order data
       if (!foundOrder) {
-        console.log('[VER_CUENTA] Strategy 3: activeOrders in memory, count:', activeOrders.length);
-        const byTableId = activeOrders.find((o) => o.tableId === table.id);
-        const byOrderId = table.currentOrderId ? activeOrders.find((o) => o.id === table.currentOrderId) : undefined;
-        foundOrder = byTableId || byOrderId || null;
-        console.log('[VER_CUENTA] Strategy 3 result: byTableId=', !!byTableId, 'byOrderId=', !!byOrderId);
-      }
-
-      // Strategy 4: Check storeTables for embedded order data
-      if (!foundOrder) {
-        console.log('[VER_CUENTA] Strategy 4: storeTables embedded order');
         const storeTable = storeTables.find((t) => t.id === table.id);
         if (storeTable) {
           const stAny = storeTable as any; // eslint-disable-line
-          console.log('[VER_CUENTA] Strategy 4: storeTable found, currentOrder=', !!stAny.currentOrder, 'items=', stAny.currentOrder?.items?.length);
-          if (stAny.currentOrder) {
-            foundOrder = stAny.currentOrder;
-          }
-        } else {
-          console.log('[VER_CUENTA] Strategy 4: storeTable not found for id:', table.id);
+          if (stAny.currentOrder) foundOrder = stAny.currentOrder;
         }
-      }
-
-      console.log('[VER_CUENTA] === FINAL RESULT:', foundOrder ? `Order #${foundOrder.orderNumber} items=${foundOrder.items?.length} total=${foundOrder.total}` : 'NULL - no order found');
-      if (foundOrder?.items) {
-        foundOrder.items.forEach((it: any) => { // eslint-disable-line
-          console.log('[VER_CUENTA]   Item:', it.quantity, 'x', it.name || it.product?.name || it.productId, '@ $' + it.unitPrice);
-        });
       }
 
       setBillOrder(foundOrder);

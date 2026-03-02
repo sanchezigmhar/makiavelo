@@ -56,6 +56,9 @@ interface CartState {
     customerId?: string;
     items: {
       productId: string;
+      name: string;
+      unitPrice: number;
+      courseType: string;
       quantity: number;
       notes?: string;
       modifiers?: { modifierOptionId: string }[];
@@ -201,6 +204,9 @@ export const useCartStore = create<CartState>((set, get) => ({
       customerId: state.customerId || undefined,
       items: state.items.map((item) => ({
         productId: item.productId,
+        name: item.name,
+        unitPrice: item.unitPrice,
+        courseType: item.courseType,
         quantity: item.quantity,
         notes: item.notes || undefined,
         modifiers: item.modifiers.length > 0
