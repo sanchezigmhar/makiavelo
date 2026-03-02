@@ -1874,10 +1874,10 @@ export default function MesasPage() {
           ))}
           {/* Ready items indicator */}
           {readyItems.filter((n) => n.status === 'READY').length > 0 && (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg shadow-sm text-sm whitespace-nowrap animate-pulse">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-emerald-600" />
-              <span className="text-emerald-700 font-semibold">Comida Lista</span>
-              <span className="font-bold text-emerald-800">{readyItems.filter((n) => n.status === 'READY').length}</span>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-fuchsia-50 border border-fuchsia-300 rounded-lg shadow-sm text-sm whitespace-nowrap animate-pulse">
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 bg-fuchsia-500" />
+              <span className="text-fuchsia-700 font-semibold">Comida Lista</span>
+              <span className="font-bold text-fuchsia-800">{readyItems.filter((n) => n.status === 'READY').length}</span>
             </div>
           )}
         </div>
@@ -2051,7 +2051,7 @@ export default function MesasPage() {
                           // Green when food is READY for this table
                           table.status === 'OCCUPIED' &&
                           readyItems.some((n) => n.status === 'READY' && n.tableNumber === table.number)
-                            ? '#059669' // Emerald-600: food is ready!
+                            ? '#D946EF' // Fuchsia-500: food is ready!
                             : undefined
                         }
                       />
@@ -2094,7 +2094,7 @@ export default function MesasPage() {
                         ).length;
                         if (readyCount === 0) return null;
                         return (
-                          <div className="absolute -top-3 right-0 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-0.5 animate-bounce whitespace-nowrap">
+                          <div className="absolute -top-3 right-0 bg-fuchsia-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md flex items-center gap-0.5 animate-bounce whitespace-nowrap">
                             🔔 {readyCount} listo{readyCount > 1 ? 's' : ''}
                           </div>
                         );
