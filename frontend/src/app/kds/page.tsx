@@ -198,19 +198,33 @@ function KdsPage() {
     },
   ], []);
 
+  const isUsingBackend = useRef(false);
+
   useEffect(() => {
     const fetchOrders = async () => {
       setIsLoading(true);
       try {
         const { data } = await api.get('/kds/orders');
-        setOrders(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setOrders(data);
+          isUsingBackend.current = true;
+        } else if (!isUsingBackend.current && orders.length === 0) {
+          // Only set demo orders if we haven't received backend data and no local changes
+          setOrders(demoOrders);
+        }
       } catch {
-        setOrders(demoOrders);
+        if (orders.length === 0) {
+          setOrders(demoOrders);
+        }
+        // If orders already have local changes, don't overwrite with demoOrders
       }
       setIsLoading(false);
     };
     fetchOrders();
-    const interval = setInterval(fetchOrders, 30000);
+    // Only poll backend if we're connected to it
+    const interval = setInterval(() => {
+      if (isUsingBackend.current) fetchOrders();
+    }, 30000);
     return () => clearInterval(interval);
   }, [demoOrders]);
 
@@ -311,23 +325,28 @@ function KdsPage() {
     );
   }, [roleFilteredOrders, selectedStation]);
 
+  // Helper: get the real working list of orders (handles case where orders=[] but demoOrders shown)
+  const getWorkingOrders = useCallback(() => {
+    return orders.length > 0 ? orders : demoOrders;
+  }, [orders, demoOrders]);
+
   const handleBump = async (orderId: string) => {
     if (!isKitchenMode) return; // Only kitchen can bump
 
-    const order = displayOrders.find((o) => o.id === orderId);
+    const workingOrders = getWorkingOrders();
+    const order = workingOrders.find((o) => o.id === orderId)
+      || storeKdsOrders.find((o) => o.id === orderId);
     if (!order) return;
 
     const newStatus = order.status === 'NEW' ? 'PREPARING' : 'READY';
 
     if (newStatus === 'READY') {
       // Bump ALL items in this order to READY via backend
-      let backendSuccess = false;
       const pendingItems = order.items.filter((i: KdsOrderItem) => i.status !== 'READY');
 
       for (const item of pendingItems) {
         try {
           await api.post(`/api/v1/kds/items/${item.id}/bump`);
-          backendSuccess = true;
         } catch {
           // Will handle in demo mode below
         }
@@ -348,19 +367,25 @@ function KdsPage() {
       });
 
       toast.success(`Orden #${order.orderNumber} LISTA`, { duration: 2000 });
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      // Remove from working orders
+      const updated = workingOrders.filter((o) => o.id !== orderId);
+      setOrders(updated);
     } else {
-      // NEW → PREPARING: just update local state
-      setOrders((prev) =>
-        prev.map((o) => o.id === orderId ? { ...o, status: 'PREPARING' as KdsOrder['status'] } : o)
+      // NEW → PREPARING: update working orders
+      const updated = workingOrders.map((o) =>
+        o.id === orderId ? { ...o, status: 'PREPARING' as KdsOrder['status'] } : o
       );
+      setOrders(updated);
+      toast(`Preparando orden #${order.orderNumber}`, { icon: '🔥', duration: 1500 });
     }
   };
 
   const handleItemBump = async (orderId: string, itemId: string) => {
     if (!isKitchenMode) return; // Only kitchen can bump items
 
-    const order = displayOrders.find((o) => o.id === orderId);
+    const workingOrders = getWorkingOrders();
+    const order = workingOrders.find((o) => o.id === orderId)
+      || storeKdsOrders.find((o) => o.id === orderId);
     const item = order?.items.find((i: KdsOrderItem) => i.id === itemId);
 
     // Try backend first
@@ -370,18 +395,21 @@ function KdsPage() {
       // Demo mode fallback — notification handled below
     }
 
-    // Update local state
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id !== orderId) return o;
-        return {
-          ...o,
-          items: o.items.map((i: KdsOrderItem) =>
-            i.id === itemId ? { ...i, status: 'READY' as const } : i
-          ),
-        };
-      })
-    );
+    // Update working orders
+    const updated = workingOrders.map((o) => {
+      if (o.id !== orderId) return o;
+      const updatedItems = o.items.map((i: KdsOrderItem) =>
+        i.id === itemId ? { ...i, status: 'READY' as const } : i
+      );
+      // If all items are READY, mark order as READY
+      const allReady = updatedItems.every((i: KdsOrderItem) => i.status === 'READY');
+      return {
+        ...o,
+        items: updatedItems,
+        status: allReady ? 'READY' as const : o.status,
+      };
+    });
+    setOrders(updated);
 
     // Notify mesero
     if (order && item) {
@@ -395,6 +423,7 @@ function KdsPage() {
         status: 'READY',
         quantity: item.quantity,
       });
+      toast.success(`${item.name} LISTO!`, { icon: '✅', duration: 1500 });
     }
   };
 
