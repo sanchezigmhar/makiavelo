@@ -1376,9 +1376,14 @@ export default function MesasPage() {
   }, [fusionSourceTable, fusionPreview]);
 
   // ---- SPLIT FLOW ----
-  // Open split sheet
+  // Open split sheet (blocked if table has active order)
   const handleOpenSplit = useCallback(
     (table: CanvasTable) => {
+      // Block split if table is occupied (has active order / food sent)
+      if (table.status === 'OCCUPIED') {
+        toast.error('No puedes separar mesas con una cuenta abierta. Primero cobra la cuenta.', { duration: 3000, icon: '🚫' });
+        return;
+      }
       setShowTableSheet(false);
       setSelectedTable(null);
       setSplitSourceTable(table);
@@ -2542,15 +2547,22 @@ export default function MesasPage() {
                     ))}
                   </div>
                 </div>
-                <Button
-                  variant="secondary"
-                  size="lg"
-                  fullWidth
-                  icon={<ScissorsIcon className="w-5 h-5" />}
-                  onClick={() => handleOpenSplit(selectedTable)}
-                >
-                  Separar Mesas
-                </Button>
+                {selectedTable.status === 'OCCUPIED' ? (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                    <p className="text-sm font-semibold text-red-600">🚫 No se puede separar</p>
+                    <p className="text-xs text-red-500 mt-1">Primero cobra la cuenta para poder separar las mesas</p>
+                  </div>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    fullWidth
+                    icon={<ScissorsIcon className="w-5 h-5" />}
+                    onClick={() => handleOpenSplit(selectedTable)}
+                  >
+                    Separar Mesas
+                  </Button>
+                )}
               </div>
             )}
 
