@@ -1111,6 +1111,13 @@ export default function MesasPage() {
         }
       } catch { /* ignore */ }
 
+      // Load persisted table→order links from localStorage
+      let tableOrderLinks: Record<string, { orderId?: string; orderTotal?: number; occupiedAt?: string }> = {};
+      try {
+        const saved = localStorage.getItem('makiavelo-table-orders');
+        if (saved) tableOrderLinks = JSON.parse(saved);
+      } catch { /* ignore */ }
+
       const demoCanvas: CanvasTable[] = storeTables
         .filter((t) => !mergedOriginalIds.has(t.id)) // Skip tables absorbed into a merge
         .map((t) => {
@@ -1118,6 +1125,9 @@ export default function MesasPage() {
           const activeOrder = tAny.currentOrder;
           const serverUser = tAny.assignedUser;
           const savedPos = savedPositions.get(t.id);
+          const savedLink = tableOrderLinks[t.id];
+          // Also check activeOrders for this table's order
+          const storeOrder = activeOrders.find((o) => o.tableId === t.id);
           return {
             id: t.id,
             number: t.number,
@@ -1129,10 +1139,10 @@ export default function MesasPage() {
             shape: (t.shape === 'bar' ? 'bar-segment' : t.shape === 'rect' ? 'rect-horizontal' : t.shape || 'round') as TableShape,
             x: savedPos?.x ?? t.posX ?? (80 + ((t.number - 1) % 6) * 140),
             y: savedPos?.y ?? t.posY ?? (80 + Math.floor((t.number - 1) / 6) * 160),
-            occupiedAt: t.occupiedAt || activeOrder?.createdAt,
-            orderTotal: activeOrder?.total,
+            occupiedAt: t.occupiedAt || activeOrder?.createdAt || savedLink?.occupiedAt,
+            orderTotal: activeOrder?.total || storeOrder?.total || savedLink?.orderTotal,
             serverName: serverUser?.name,
-            currentOrderId: tAny.currentOrderId || activeOrder?.id,
+            currentOrderId: tAny.currentOrderId || activeOrder?.id || savedLink?.orderId || storeOrder?.id,
           };
         });
 
@@ -1558,20 +1568,55 @@ export default function MesasPage() {
       setTable(table.id, table.name);
       setShowTableSheet(false);
 
-      // If table is OCCUPIED and has an existing order, load items into the cart
-      if (table.status === 'OCCUPIED' && table.currentOrderId) {
+      // If table is OCCUPIED, try to load existing order items into cart
+      if (table.status === 'OCCUPIED') {
         let existingOrder: import('@/types').Order | null = null;
 
-        // Try to fetch from backend or memory
-        try {
-          existingOrder = await fetchOrder(table.currentOrderId);
-        } catch { /* ignore */ }
+        // Strategy 1: Fetch by currentOrderId from backend
+        if (table.currentOrderId) {
+          try {
+            existingOrder = await fetchOrder(table.currentOrderId);
+          } catch { /* ignore */ }
+        }
 
+        // Strategy 2: Look up persisted orderId from localStorage
         if (!existingOrder) {
-          existingOrder = activeOrders.find((o) => o.id === table.currentOrderId)
+          try {
+            const savedOrders = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
+            const savedLink = savedOrders[table.id];
+            if (savedLink?.orderId) {
+              existingOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
+              if (!existingOrder) {
+                try { existingOrder = await fetchOrder(savedLink.orderId); } catch { /* ignore */ }
+              }
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Strategy 3: Search in memory by currentOrderId or tableId
+        if (!existingOrder) {
+          existingOrder = (table.currentOrderId
+            ? activeOrders.find((o) => o.id === table.currentOrderId)
+            : null)
             || activeOrders.find((o) => o.tableId === table.id)
             || (storeTables.find((t) => t.id === table.id) as any)?.currentOrder // eslint-disable-line
             || null;
+        }
+
+        // Strategy 4: For merged tables, also check original table IDs
+        if (!existingOrder && table.mergedFrom) {
+          const originalIds = table.mergedFrom.map((m) => m.id);
+          existingOrder = activeOrders.find((o) => o.tableId && originalIds.includes(o.tableId)) || null;
+        }
+
+        // Strategy 5: Fetch active orders for this table from backend by tableId
+        if (!existingOrder && table.id) {
+          try {
+            const tableOrders = await fetchOrdersByTable(table.id);
+            if (tableOrders && tableOrders.length > 0) {
+              existingOrder = tableOrders[0];
+            }
+          } catch { /* ignore */ }
         }
 
         if (existingOrder && existingOrder.items && existingOrder.items.length > 0) {
@@ -1584,12 +1629,21 @@ export default function MesasPage() {
             notes: it.notes,
           }));
           setExistingOrder(existingOrder.id, mapped);
+
+          // Also update the canvas table with currentOrderId if missing
+          if (!table.currentOrderId) {
+            setCanvasTables((prev) =>
+              prev.map((ct) =>
+                ct.id === table.id ? { ...ct, currentOrderId: existingOrder!.id } : ct
+              )
+            );
+          }
         }
       }
 
       router.push('/pedidos');
     },
-    [setTable, setExistingOrder, router, fetchOrder, activeOrders, storeTables]
+    [setTable, setExistingOrder, router, fetchOrder, activeOrders, storeTables, fetchOrdersByTable, setCanvasTables]
   );
 
   const handleViewOrder = useCallback(

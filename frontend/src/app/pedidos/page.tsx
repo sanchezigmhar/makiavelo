@@ -206,6 +206,14 @@ export default function PedidosPage() {
     const tableName = cart.tableName;
     const existingOrderId = cart.existingOrderId;
 
+    // Save cart item details before clearing (needed for demo mode enrichment)
+    const cartItemDetails = new Map(
+      cart.items.map((item) => [
+        item.productId,
+        { name: item.name, unitPrice: item.unitPrice, courseType: item.courseType },
+      ])
+    );
+
     if (existingOrderId) {
       // ---- ADD ITEMS TO EXISTING ORDER ----
       const newItems = cart.items.map((item) => ({
@@ -221,7 +229,35 @@ export default function PedidosPage() {
         await addItemsToOrder(existingOrderId, newItems);
         await sendToKitchen(existingOrderId);
       } catch {
-        // Demo mode: items added locally via store
+        // Demo mode: add items locally to the existing order in the store
+        const { activeOrders } = useOrdersStore.getState();
+        const existingOrd = activeOrders.find((o) => o.id === existingOrderId);
+        if (existingOrd) {
+          const newOrderItems = cart.items.map((item, idx) => ({
+            id: `oi_${Date.now()}_${idx}`,
+            orderId: existingOrderId,
+            productId: item.productId,
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.unitPrice * item.quantity,
+            courseType: item.courseType,
+            status: 'PENDING' as const,
+            sortOrder: (existingOrd.items?.length || 0) + idx,
+            notes: item.notes || undefined,
+          }));
+          const updatedOrder = {
+            ...existingOrd,
+            items: [...(existingOrd.items || []), ...newOrderItems],
+            subtotal: (existingOrd.subtotal || 0) + newOrderItems.reduce((s, i) => s + i.totalPrice, 0),
+            total: (existingOrd.total || 0) + newOrderItems.reduce((s, i) => s + i.totalPrice, 0),
+            status: 'IN_PROGRESS' as const,
+          };
+          useOrdersStore.setState((state) => ({
+            activeOrders: state.activeOrders.map((o) => o.id === existingOrderId ? updatedOrder : o),
+            orders: state.orders.map((o) => o.id === existingOrderId ? updatedOrder : o),
+          }));
+        }
       }
 
       const itemCount = cart.items.reduce((s, i) => s + i.quantity, 0);
@@ -236,13 +272,45 @@ export default function PedidosPage() {
       const payload = cart.getCartPayload();
       const order = await createOrder(payload);
       if (order) {
+        // Enrich demo order items with real names and prices from cart
+        if (order.id.startsWith('demo_')) {
+          const enrichedItems = order.items.map((item) => {
+            const detail = cartItemDetails.get(item.productId);
+            return detail
+              ? { ...item, name: detail.name, unitPrice: detail.unitPrice, totalPrice: detail.unitPrice * item.quantity, courseType: detail.courseType }
+              : item;
+          });
+          const enrichedSubtotal = enrichedItems.reduce((s, i) => s + (i.totalPrice || i.unitPrice * i.quantity), 0);
+          const enrichedOrder = { ...order, items: enrichedItems, subtotal: enrichedSubtotal, total: enrichedSubtotal };
+
+          // Update in store
+          useOrdersStore.setState((state) => ({
+            activeOrders: state.activeOrders.map((o) => o.id === order.id ? enrichedOrder : o),
+            orders: state.orders.map((o) => o.id === order.id ? enrichedOrder : o),
+            currentOrder: state.currentOrder?.id === order.id ? enrichedOrder : state.currentOrder,
+          }));
+        }
+
         await sendToKitchen(order.id);
 
         // Update table status to OCCUPIED on the backend
         if (tableId) {
           await updateTableStatus(tableId, 'OCCUPIED');
 
-          // For merged tables, persist the OCCUPIED state
+          // Persist the order link for ALL tables (so we can find the order later)
+          try {
+            const key = 'makiavelo-table-orders';
+            const existing = JSON.parse(localStorage.getItem(key) || '{}');
+            existing[tableId] = {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              occupiedAt: new Date().toISOString(),
+              orderTotal: order.total || 0,
+            };
+            localStorage.setItem(key, JSON.stringify(existing));
+          } catch { /* ignore */ }
+
+          // For merged tables, also persist the OCCUPIED state
           if (tableId.startsWith('merged-')) {
             try {
               const key = 'makiavelo-merged-table-orders';
