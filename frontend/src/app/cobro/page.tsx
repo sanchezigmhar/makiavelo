@@ -93,7 +93,7 @@ function CobroPage() {
   const [tipPercent, setTipPercent] = useState(10);
   const [customTip, setCustomTip] = useState('');
   const [useCustomTip, setUseCustomTip] = useState(false);
-  const [printReceipt, setPrintReceipt] = useState(true);
+  const [printReceipt, setPrintReceipt] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -239,6 +239,10 @@ function CobroPage() {
       return perPerson;
     }
     if (splitMode === 'by-items') {
+      // If all items are paid, the remaining balance is just tax + tip remainder
+      const allPaid = paidItemIds.size >= order.items.length;
+      if (allPaid) return +(remainingBalance).toFixed(2);
+
       // Sum selected items + proportional tax and tip
       const selectedItems = order.items.filter((i) => selectedItemIds.has(i.id));
       const selectedSubtotal = selectedItems.reduce((sum, i) => sum + i.totalPrice, 0);
@@ -251,8 +255,10 @@ function CobroPage() {
 
   const cashValue = parseFloat(cashAmount || '0');
   const change = selectedMethod === 'CASH' ? Math.max(0, cashValue - currentPaymentAmount) : 0;
+  // When all items are paid but remaining balance exists (tax + tip), allow final payment
+  const allItemsPaid = splitMode === 'by-items' && paidItemIds.size >= order.items.length;
   const canProcess = splitMode === 'by-items'
-    ? selectedItemIds.size > 0 && (selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount)
+    ? (selectedItemIds.size > 0 || allItemsPaid) && (selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount)
     : selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount;
   const resolvedTableId = searchParams?.get('tableId') || order.tableId || null;
 
@@ -520,7 +526,14 @@ function CobroPage() {
                     );
                   })}
                 </div>
-                {selectedItemIds.size > 0 && (
+                {allItemsPaid && remainingBalance > 0.01 && (
+                  <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+                    <p className="text-sm font-semibold text-amber-800">Todos los items pagados</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Resta impuestos y propina</p>
+                    <p className="text-touch-lg font-bold text-amber-900 mt-1">{formatCurrency(remainingBalance)}</p>
+                  </div>
+                )}
+                {selectedItemIds.size > 0 && !allItemsPaid && (
                   <div className="mt-2 p-2 bg-maki-light rounded-xl text-center">
                     <p className="text-sm text-maki-gray">{selectedItemIds.size} item{selectedItemIds.size > 1 ? 's' : ''} seleccionado{selectedItemIds.size > 1 ? 's' : ''}</p>
                     <p className="text-touch-lg font-bold text-maki-dark">{formatCurrency(currentPaymentAmount)}</p>
@@ -616,7 +629,13 @@ function CobroPage() {
             <Button variant="success" size="xl" fullWidth loading={isProcessing} disabled={!canProcess} onClick={handleProcessPayment} icon={<CheckCircleIcon className="w-6 h-6" />}>
               {splitMode === 'full' && `Cobrar ${formatCurrency(currentPaymentAmount)}`}
               {splitMode === 'equal' && `Cobrar ${formatCurrency(currentPaymentAmount)} (Persona ${currentSplitPerson}/${splitCount})`}
-              {splitMode === 'by-items' && (selectedItemIds.size > 0 ? `Cobrar ${formatCurrency(currentPaymentAmount)} (${selectedItemIds.size} item${selectedItemIds.size > 1 ? 's' : ''})` : 'Selecciona items')}
+              {splitMode === 'by-items' && (
+                allItemsPaid
+                  ? `Cobrar restante ${formatCurrency(currentPaymentAmount)}`
+                  : selectedItemIds.size > 0
+                    ? `Cobrar ${formatCurrency(currentPaymentAmount)} (${selectedItemIds.size} item${selectedItemIds.size > 1 ? 's' : ''})`
+                    : 'Selecciona items'
+              )}
             </Button>
           </div>
         </div>
