@@ -119,84 +119,8 @@ function KdsPage() {
   }, [searchParams, user]);
 
   // Demo KDS orders
-  const demoOrders: KdsOrder[] = useMemo(() => [
-    {
-      id: 'kds-1', orderNumber: '142', tableNumber: 3, tableName: 'Mesa 3',
-      items: [
-        { id: 'ki1', name: 'Dragon Roll', quantity: 2, status: 'PENDING', courseType: 'PLATO_FUERTE', station: 'sushi', modifiers: ['Extra wasabi'] },
-        { id: 'ki2', name: 'Edamame', quantity: 1, status: 'PENDING', courseType: 'ENTRADA', station: 'cocina-fria' },
-      ],
-      createdAt: new Date(Date.now() - 3 * 60000).toISOString(),
-      elapsedMinutes: 3, serverName: 'Carlos', status: 'NEW',
-    },
-    {
-      id: 'kds-2', orderNumber: '141', tableNumber: 7, tableName: 'Mesa 7',
-      items: [
-        { id: 'ki3', name: 'Ramen Tonkotsu', quantity: 1, status: 'PREPARING', courseType: 'PLATO_FUERTE', station: 'cocina-caliente' },
-        { id: 'ki4', name: 'Gyoza (6 pcs)', quantity: 2, status: 'READY', courseType: 'ENTRADA', station: 'cocina-caliente' },
-        { id: 'ki5', name: 'Miso Soup', quantity: 1, status: 'PREPARING', courseType: 'ENTRADA', station: 'cocina-caliente' },
-      ],
-      createdAt: new Date(Date.now() - 8 * 60000).toISOString(),
-      elapsedMinutes: 8, serverName: 'Maria', status: 'PREPARING',
-      notes: 'Cliente alergico al mani',
-    },
-    {
-      id: 'kds-3', orderNumber: '139', tableNumber: 12, tableName: 'Mesa 12',
-      items: [
-        { id: 'ki6', name: 'Wagyu Tataki', quantity: 1, status: 'PREPARING', courseType: 'PLATO_FUERTE', station: 'parrilla', notes: 'Termino medio' },
-        { id: 'ki7', name: 'Tempura Mixto', quantity: 1, status: 'READY', courseType: 'ENTRADA', station: 'cocina-caliente' },
-        { id: 'ki8', name: 'Teriyaki Chicken', quantity: 2, status: 'PREPARING', courseType: 'PLATO_FUERTE', station: 'cocina-caliente' },
-      ],
-      createdAt: new Date(Date.now() - 14 * 60000).toISOString(),
-      elapsedMinutes: 14, serverName: 'Pedro', status: 'PREPARING',
-    },
-    {
-      id: 'kds-4', orderNumber: '138', tableNumber: 1, tableName: 'Mesa 1',
-      items: [
-        { id: 'ki9', name: 'Salmon Roll', quantity: 3, status: 'PREPARING', courseType: 'PLATO_FUERTE', station: 'sushi' },
-        { id: 'ki10', name: 'Spicy Tuna Roll', quantity: 2, status: 'PENDING', courseType: 'PLATO_FUERTE', station: 'sushi' },
-      ],
-      createdAt: new Date(Date.now() - 18 * 60000).toISOString(),
-      elapsedMinutes: 18, serverName: 'Ana', status: 'LATE',
-    },
-    {
-      id: 'kds-5', orderNumber: '143', tableNumber: 9, tableName: 'Mesa 9',
-      items: [
-        { id: 'ki11', name: 'Mochi Ice Cream', quantity: 4, status: 'PENDING', courseType: 'POSTRE', station: 'cocina-fria' },
-        { id: 'ki12', name: 'Matcha Cheesecake', quantity: 2, status: 'PENDING', courseType: 'POSTRE', station: 'cocina-fria' },
-      ],
-      createdAt: new Date(Date.now() - 1 * 60000).toISOString(),
-      elapsedMinutes: 1, serverName: 'Carlos', status: 'NEW',
-    },
-    {
-      id: 'kds-6', orderNumber: '144', tableNumber: 3, tableName: 'Mesa 3',
-      items: [
-        { id: 'ki13', name: 'Margarita Clasica', quantity: 2, status: 'PENDING', courseType: 'BEBIDA', station: 'barra' },
-        { id: 'ki14', name: 'Mojito', quantity: 1, status: 'PENDING', courseType: 'BEBIDA', station: 'barra' },
-      ],
-      createdAt: new Date(Date.now() - 2 * 60000).toISOString(),
-      elapsedMinutes: 2, serverName: 'Maria', status: 'NEW',
-    },
-    {
-      id: 'kds-7', orderNumber: '145', tableNumber: 5, tableName: 'Mesa 5',
-      items: [
-        { id: 'ki15', name: 'Pina Colada', quantity: 1, status: 'PREPARING', courseType: 'BEBIDA', station: 'barra' },
-        { id: 'ki16', name: 'Sake Caliente', quantity: 2, status: 'PENDING', courseType: 'BEBIDA', station: 'barra' },
-        { id: 'ki17', name: 'Cerveza Artesanal', quantity: 3, status: 'PENDING', courseType: 'BEBIDA', station: 'barra' },
-      ],
-      createdAt: new Date(Date.now() - 5 * 60000).toISOString(),
-      elapsedMinutes: 5, serverName: 'Ana', status: 'PREPARING',
-    },
-    {
-      id: 'kds-8', orderNumber: '140', tableNumber: 7, tableName: 'Mesa 7',
-      items: [
-        { id: 'ki18', name: 'Whisky Sour', quantity: 1, status: 'PREPARING', courseType: 'BEBIDA', station: 'barra' },
-        { id: 'ki19', name: 'Agua Mineral', quantity: 2, status: 'READY', courseType: 'BEBIDA', station: 'barra' },
-      ],
-      createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
-      elapsedMinutes: 10, serverName: 'Pedro', status: 'PREPARING',
-    },
-  ], []);
+  // No demo orders — KDS starts clean; only real orders from pedidos appear
+  const demoOrders: KdsOrder[] = useMemo(() => [], []);
 
   const isUsingBackend = useRef(false);
 
