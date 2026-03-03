@@ -26,6 +26,18 @@ export class InvoicesController {
     return this.invoicesService.create(createInvoiceDto);
   }
 
+  @Post('dgi')
+  @Roles('owner', 'admin', 'cashier', 'server')
+  createAndSendToDgi(@Body() createInvoiceDto: CreateInvoiceDto) {
+    return this.invoicesService.createAndSendToDgi(createInvoiceDto);
+  }
+
+  @Post(':id/dgi')
+  @Roles('owner', 'admin', 'cashier', 'server')
+  sendToDgi(@Param('id', ParseUUIDPipe) id: string) {
+    return this.invoicesService.sendToDgi(id);
+  }
+
   @Get()
   findAll(
     @Query('orderId') orderId?: string,
