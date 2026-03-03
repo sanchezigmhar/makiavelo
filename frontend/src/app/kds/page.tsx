@@ -222,7 +222,7 @@ function KdsPage() {
             id: item.id,
             name: item.name || item.productId,
             quantity: item.quantity,
-            status: (item.status === 'READY' ? 'READY' : 'PENDING') as 'PENDING' | 'PREPARING' | 'READY',
+            status: (['READY', 'PREPARING', 'PENDING'].includes(item.status) ? item.status : 'PENDING') as 'PENDING' | 'PREPARING' | 'READY',
             courseType: item.courseType,
             station: item.station || undefined,
             notes: item.notes,

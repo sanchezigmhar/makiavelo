@@ -203,7 +203,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       const demoSubtotal = demoItems.reduce((s, i) => s + i.totalPrice, 0);
       const demoOrder: Order = {
         id: `demo_${demoOrderCounter}`,
-        orderNumber: `${150 + demoOrderCounter}`,
+        orderNumber: `${demoOrderCounter}`,
         type: (orderData.type || 'DINE_IN') as Order['type'],
         status: 'OPEN',
         tableId: orderData.tableId,

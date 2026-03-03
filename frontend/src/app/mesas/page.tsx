@@ -1138,9 +1138,12 @@ export default function MesasPage() {
           // Check demo orders in localStorage for active orders on this table
           const demoOrder = demoOrdersForStatus.find((o) => o.tableId === t.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
 
-          // Determine actual status: if there's an active order from ANY source, mesa is OCCUPIED
+          // Determine actual status: respect CLEANING/RESERVED, otherwise check for active orders
           const hasActiveOrder = !!(activeOrder || storeOrder || demoOrder || (savedLink?.orderId));
-          const effectiveStatus = hasActiveOrder ? 'OCCUPIED' as TableStatus : t.status;
+          const preservedStatuses = ['CLEANING', 'RESERVED', 'BLOCKED'];
+          const effectiveStatus = preservedStatuses.includes(t.status)
+            ? t.status  // Respect manual status changes (cleaning after payment, reservations, etc.)
+            : hasActiveOrder ? 'OCCUPIED' as TableStatus : t.status;
 
           return {
             id: t.id,
@@ -3269,9 +3272,10 @@ export default function MesasPage() {
                   fullWidth
                   icon={<PlusIcon className="w-5 h-5" />}
                   onClick={() => {
+                    const tableRef = billTable;
                     setShowBillSheet(false);
                     setBillTable(null);
-                    handleOpenOrder(billTable);
+                    if (tableRef) handleOpenOrder(tableRef);
                   }}
                 >
                   Agregar Más Items

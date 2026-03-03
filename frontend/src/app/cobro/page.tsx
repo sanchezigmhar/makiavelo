@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, Suspense, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -275,7 +275,10 @@ function CobroPage() {
     } catch { /* ignore */ }
   };
 
+  const processingRef = useRef(false);
   const handleProcessPayment = async () => {
+    if (processingRef.current) return; // Prevent double-click
+    processingRef.current = true;
     setIsProcessing(true);
     const backendMethodMap: Record<string, string> = { 'CASH': 'CASH', 'CARD': 'CREDIT_CARD', 'YAPPY': 'TRANSFER', 'TRANSFER': 'TRANSFER', 'OTHER': 'OTHER' };
     const backendMethod = backendMethodMap[selectedMethod] || selectedMethod;
@@ -325,6 +328,7 @@ function CobroPage() {
     }
 
     setIsProcessing(false);
+    processingRef.current = false;
 
     if (isLastPayment) {
       // Final payment — show invoice modal
