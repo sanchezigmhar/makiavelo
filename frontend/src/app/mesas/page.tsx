@@ -1572,11 +1572,25 @@ export default function MesasPage() {
       if (table.status === 'OCCUPIED') {
         let existingOrder: import('@/types').Order | null = null;
 
-        // Strategy 1: Fetch by currentOrderId from backend
+        // Helper: load demo orders directly from localStorage
+        const loadDemoLocal = (): import('@/types').Order[] => {
+          try {
+            const stored = localStorage.getItem('makiavelo-demo-orders');
+            if (!stored) return [];
+            return JSON.parse(stored) as import('@/types').Order[];
+          } catch { return []; }
+        };
+
+        // Strategy 1: Fetch by currentOrderId from backend (also checks localStorage demos)
         if (table.currentOrderId) {
           try {
             existingOrder = await fetchOrder(table.currentOrderId);
           } catch { /* ignore */ }
+        }
+
+        // Strategy 1b: Direct localStorage demo order lookup by ID
+        if (!existingOrder && table.currentOrderId) {
+          existingOrder = loadDemoLocal().find((o) => o.id === table.currentOrderId) || null;
         }
 
         // Strategy 2: Look up persisted orderId from localStorage
@@ -1585,7 +1599,8 @@ export default function MesasPage() {
             const savedOrders = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
             const savedLink = savedOrders[table.id];
             if (savedLink?.orderId) {
-              existingOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
+              existingOrder = loadDemoLocal().find((o) => o.id === savedLink.orderId) || null;
+              if (!existingOrder) existingOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
               if (!existingOrder) {
                 try { existingOrder = await fetchOrder(savedLink.orderId); } catch { /* ignore */ }
               }
@@ -1603,7 +1618,17 @@ export default function MesasPage() {
             || null;
         }
 
-        // Strategy 4: For merged tables, also check original table IDs
+        // Strategy 3b: Direct localStorage demo orders by tableId
+        if (!existingOrder) {
+          const demoOrders = loadDemoLocal();
+          existingOrder = demoOrders.find((o) => o.tableId === table.id) || null;
+          if (!existingOrder && table.mergedFrom) {
+            const originalIds = table.mergedFrom.map((m) => m.id);
+            existingOrder = demoOrders.find((o) => o.tableId && originalIds.includes(o.tableId)) || null;
+          }
+        }
+
+        // Strategy 4: For merged tables, also check original table IDs in activeOrders
         if (!existingOrder && table.mergedFrom) {
           const originalIds = table.mergedFrom.map((m) => m.id);
           existingOrder = activeOrders.find((o) => o.tableId && originalIds.includes(o.tableId)) || null;
@@ -1656,26 +1681,49 @@ export default function MesasPage() {
 
       let foundOrder: import('@/types').Order | null = null;
 
-      // Strategy 1: Fetch order by ID from backend (any length ID)
+      // Helper: load demo orders directly from localStorage (avoids stale closures)
+      const loadDemoOrdersLocal = (): import('@/types').Order[] => {
+        try {
+          const stored = localStorage.getItem('makiavelo-demo-orders');
+          if (!stored) return [];
+          return JSON.parse(stored) as import('@/types').Order[];
+        } catch { return []; }
+      };
+
+      console.log('[VIEW_ORDER] Starting lookup for table:', table.id, 'currentOrderId:', table.currentOrderId);
+
+      // Strategy 1: Fetch order by ID from backend / demo store (fetchOrder checks localStorage too)
       if (table.currentOrderId) {
         try {
           const order = await fetchOrder(table.currentOrderId);
           if (order && order.items?.length > 0) foundOrder = order;
+          console.log('[VIEW_ORDER] Strategy 1 (fetchOrder):', foundOrder ? `found ${foundOrder.items?.length} items` : 'no result');
         } catch { /* ignore */ }
       }
 
-      // Strategy 2: Look up orderId from localStorage (persisted when order was created)
+      // Strategy 1b: Direct localStorage demo order lookup by ID (bypasses stale Zustand)
+      if (!foundOrder && table.currentOrderId) {
+        const demoOrders = loadDemoOrdersLocal();
+        foundOrder = demoOrders.find((o) => o.id === table.currentOrderId) || null;
+        if (foundOrder) console.log('[VIEW_ORDER] Strategy 1b (localStorage by ID):', foundOrder.items?.length, 'items');
+      }
+
+      // Strategy 2: Look up orderId from localStorage links (persisted when order was created)
       if (!foundOrder) {
         try {
           const savedLinks = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
           const savedLink = savedLinks[table.id];
           if (savedLink?.orderId) {
-            // First check in memory
-            foundOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
+            // Check demo orders in localStorage first
+            const demoOrders = loadDemoOrdersLocal();
+            foundOrder = demoOrders.find((o) => o.id === savedLink.orderId) || null;
+            // Then check in memory
+            if (!foundOrder) foundOrder = activeOrders.find((o) => o.id === savedLink.orderId) || null;
             // Then try backend
             if (!foundOrder) {
               try { foundOrder = await fetchOrder(savedLink.orderId); } catch { /* ignore */ }
             }
+            if (foundOrder) console.log('[VIEW_ORDER] Strategy 2 (table-orders link):', foundOrder.items?.length, 'items');
           }
         } catch { /* ignore */ }
       }
@@ -1685,6 +1733,19 @@ export default function MesasPage() {
         foundOrder = activeOrders.find((o) => o.tableId === table.id)
           || (table.currentOrderId ? activeOrders.find((o) => o.id === table.currentOrderId) : null)
           || null;
+        if (foundOrder) console.log('[VIEW_ORDER] Strategy 3 (activeOrders memory):', foundOrder.items?.length, 'items');
+      }
+
+      // Strategy 3b: Direct localStorage demo order lookup by tableId (bypasses stale Zustand)
+      if (!foundOrder) {
+        const demoOrders = loadDemoOrdersLocal();
+        foundOrder = demoOrders.find((o) => o.tableId === table.id) || null;
+        // For merged tables, also check original table IDs
+        if (!foundOrder && table.mergedFrom) {
+          const originalIds = table.mergedFrom.map((m) => m.id);
+          foundOrder = demoOrders.find((o) => o.tableId && originalIds.includes(o.tableId)) || null;
+        }
+        if (foundOrder) console.log('[VIEW_ORDER] Strategy 3b (localStorage by tableId):', foundOrder.items?.length, 'items');
       }
 
       // Strategy 4: Fetch active orders for this table from backend by tableId
@@ -1703,6 +1764,7 @@ export default function MesasPage() {
                 )
               );
             }
+            console.log('[VIEW_ORDER] Strategy 4 (fetchOrdersByTable):', foundOrder?.items?.length, 'items');
           }
         } catch { /* ignore */ }
       }
@@ -1712,10 +1774,14 @@ export default function MesasPage() {
         const storeTable = storeTables.find((t) => t.id === table.id);
         if (storeTable) {
           const stAny = storeTable as any; // eslint-disable-line
-          if (stAny.currentOrder) foundOrder = stAny.currentOrder;
+          if (stAny.currentOrder) {
+            foundOrder = stAny.currentOrder;
+            console.log('[VIEW_ORDER] Strategy 5 (storeTables):', foundOrder?.items?.length, 'items');
+          }
         }
       }
 
+      console.log('[VIEW_ORDER] Final result:', foundOrder ? `Order ${foundOrder.id} with ${foundOrder.items?.length} items` : 'NO ORDER FOUND');
       setBillOrder(foundOrder);
       setBillLoading(false);
     },
