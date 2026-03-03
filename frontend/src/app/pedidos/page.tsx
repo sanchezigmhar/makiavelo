@@ -76,12 +76,12 @@ export default function PedidosPage() {
   ];
 
   const demoProducts: Product[] = [
-    { id: 'p1', name: 'Dragon Roll', categoryId: 'sushi', price: 18.50, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 1, station: 'sushi-bar', description: 'Tempura shrimp, aguacate, anguila glaseada' },
-    { id: 'p2', name: 'Salmon Roll', categoryId: 'sushi', price: 14.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'sushi-bar', description: 'Salmon fresco, queso crema, pepino' },
-    { id: 'p3', name: 'Rainbow Roll', categoryId: 'sushi', price: 22.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 3, station: 'sushi-bar' },
-    { id: 'p4', name: 'Spicy Tuna Roll', categoryId: 'sushi', price: 16.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 4, station: 'sushi-bar' },
-    { id: 'p5', name: 'Sashimi Salmon', categoryId: 'sashimi', price: 24.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 1, station: 'sushi-bar' },
-    { id: 'p6', name: 'Sashimi Atun', categoryId: 'sashimi', price: 26.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'sushi-bar' },
+    { id: 'p1', name: 'Dragon Roll', categoryId: 'sushi', price: 18.50, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 1, station: 'sushi', description: 'Tempura shrimp, aguacate, anguila glaseada' },
+    { id: 'p2', name: 'Salmon Roll', categoryId: 'sushi', price: 14.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'sushi', description: 'Salmon fresco, queso crema, pepino' },
+    { id: 'p3', name: 'Rainbow Roll', categoryId: 'sushi', price: 22.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 3, station: 'sushi' },
+    { id: 'p4', name: 'Spicy Tuna Roll', categoryId: 'sushi', price: 16.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 4, station: 'sushi' },
+    { id: 'p5', name: 'Sashimi Salmon', categoryId: 'sashimi', price: 24.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 1, station: 'sushi' },
+    { id: 'p6', name: 'Sashimi Atun', categoryId: 'sashimi', price: 26.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'sushi' },
     { id: 'p7', name: 'Edamame', categoryId: 'entradas', price: 8.00, courseType: 'ENTRADA', isAvailable: true, isActive: true, sortOrder: 1, station: 'cocina-fria' },
     { id: 'p8', name: 'Gyoza (6 pcs)', categoryId: 'entradas', price: 12.00, courseType: 'ENTRADA', isAvailable: true, isActive: true, sortOrder: 2, station: 'cocina-caliente' },
     { id: 'p9', name: 'Tempura Mixto', categoryId: 'entradas', price: 15.00, courseType: 'ENTRADA', isAvailable: true, isActive: true, sortOrder: 3, station: 'cocina-caliente' },
@@ -89,13 +89,13 @@ export default function PedidosPage() {
     { id: 'p11', name: 'Ramen Tonkotsu', categoryId: 'sopas', price: 18.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'cocina-caliente' },
     { id: 'p12', name: 'Teriyaki Chicken', categoryId: 'principales', price: 20.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 1, station: 'cocina-caliente' },
     { id: 'p13', name: 'Wagyu Tataki', categoryId: 'principales', price: 38.00, courseType: 'PLATO_FUERTE', isAvailable: true, isActive: true, sortOrder: 2, station: 'cocina-caliente' },
-    { id: 'p14', name: 'Mochi Ice Cream', categoryId: 'postres', price: 9.00, courseType: 'POSTRE', isAvailable: true, isActive: true, sortOrder: 1, station: 'postres' },
-    { id: 'p15', name: 'Matcha Cheesecake', categoryId: 'postres', price: 12.00, courseType: 'POSTRE', isAvailable: true, isActive: true, sortOrder: 2, station: 'postres' },
-    { id: 'p16', name: 'Sake Copa', categoryId: 'bebidas', price: 8.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 1, station: 'bar' },
-    { id: 'p17', name: 'Asahi Beer', categoryId: 'bebidas', price: 6.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 2, station: 'bar' },
-    { id: 'p18', name: 'Te Verde', categoryId: 'bebidas', price: 4.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 3, station: 'bar' },
-    { id: 'p19', name: 'Limonada Yuzu', categoryId: 'bebidas', price: 7.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 4, station: 'bar' },
-    { id: 'p20', name: 'Agua Mineral', categoryId: 'bebidas', price: 3.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 5, station: 'bar' },
+    { id: 'p14', name: 'Mochi Ice Cream', categoryId: 'postres', price: 9.00, courseType: 'POSTRE', isAvailable: true, isActive: true, sortOrder: 1, station: 'cocina-fria' },
+    { id: 'p15', name: 'Matcha Cheesecake', categoryId: 'postres', price: 12.00, courseType: 'POSTRE', isAvailable: true, isActive: true, sortOrder: 2, station: 'cocina-fria' },
+    { id: 'p16', name: 'Sake Copa', categoryId: 'bebidas', price: 8.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 1, station: 'barra' },
+    { id: 'p17', name: 'Asahi Beer', categoryId: 'bebidas', price: 6.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 2, station: 'barra' },
+    { id: 'p18', name: 'Te Verde', categoryId: 'bebidas', price: 4.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 3, station: 'barra' },
+    { id: 'p19', name: 'Limonada Yuzu', categoryId: 'bebidas', price: 7.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 4, station: 'barra' },
+    { id: 'p20', name: 'Agua Mineral', categoryId: 'bebidas', price: 3.00, courseType: 'BEBIDA', isAvailable: true, isActive: true, sortOrder: 5, station: 'barra' },
   ];
 
   useEffect(() => {
@@ -242,6 +242,7 @@ export default function PedidosPage() {
             unitPrice: item.unitPrice,
             totalPrice: item.unitPrice * item.quantity,
             courseType: item.courseType,
+            station: item.station || undefined,
             status: 'PENDING' as const,
             sortOrder: (existingOrd.items?.length || 0) + idx,
             notes: item.notes || undefined,

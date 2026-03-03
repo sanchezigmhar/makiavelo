@@ -194,6 +194,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
           unitPrice: price,
           totalPrice: price * item.quantity,
           courseType: (item.courseType || 'PLATO_FUERTE') as OrderItem['courseType'],
+          station: (item as any).station || undefined, // eslint-disable-line
           status: 'PENDING' as const,
           sortOrder: idx,
           notes: item.notes,
