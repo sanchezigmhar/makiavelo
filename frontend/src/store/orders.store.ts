@@ -6,6 +6,38 @@ import toast from 'react-hot-toast';
 // Demo order number counter
 let demoOrderCounter = 150;
 
+// ============================================================
+// Demo order persistence helpers
+// ============================================================
+const DEMO_ORDERS_KEY = 'makiavelo-demo-orders';
+
+function saveDemoOrders(orders: Order[]) {
+  try {
+    const demoOnly = orders.filter((o) => o.id?.startsWith('demo_'));
+    if (demoOnly.length > 0) {
+      localStorage.setItem(DEMO_ORDERS_KEY, JSON.stringify(demoOnly));
+    } else {
+      localStorage.removeItem(DEMO_ORDERS_KEY);
+    }
+  } catch { /* */ }
+}
+
+function loadDemoOrders(): Order[] {
+  try {
+    const stored = localStorage.getItem(DEMO_ORDERS_KEY);
+    if (!stored) return [];
+    const orders = JSON.parse(stored) as Order[];
+    // Restore counter to avoid ID collisions
+    orders.forEach((o) => {
+      const num = parseInt(o.id?.replace('demo_', '') || '0', 10);
+      if (num > demoOrderCounter) demoOrderCounter = num;
+    });
+    return orders;
+  } catch {
+    return [];
+  }
+}
+
 interface OrdersState {
   orders: Order[];
   activeOrders: Order[];
@@ -57,7 +89,7 @@ interface OrdersState {
 
 export const useOrdersStore = create<OrdersState>((set, get) => ({
   orders: [],
-  activeOrders: [],
+  activeOrders: typeof window !== 'undefined' ? loadDemoOrders() : [],
   currentOrder: null,
   isLoading: false,
   totalCount: 0,
@@ -94,7 +126,16 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       set({ activeOrders: orders });
     } catch (err) {
       console.log('[ORDERS_STORE] fetchActiveOrders error:', err);
-      // silent
+      // In demo mode, restore persisted demo orders
+      const demoOrders = loadDemoOrders();
+      if (demoOrders.length > 0) {
+        const existing = get().activeOrders;
+        const existingIds = new Set(existing.map((o) => o.id));
+        const newDemos = demoOrders.filter((o) => !existingIds.has(o.id));
+        if (newDemos.length > 0) {
+          set({ activeOrders: [...existing, ...newDemos] });
+        }
+      }
     }
   },
 
@@ -107,6 +148,18 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       return order;
     } catch (err) {
       console.log('[ORDERS_STORE] fetchOrder error:', err);
+      // Check in-memory activeOrders first, then persisted demo orders
+      const inMemory = get().activeOrders.find((o) => o.id === id);
+      if (inMemory) {
+        set({ currentOrder: inMemory });
+        return inMemory;
+      }
+      const demoOrders = loadDemoOrders();
+      const demoOrder = demoOrders.find((o) => o.id === id);
+      if (demoOrder) {
+        set({ currentOrder: demoOrder });
+        return demoOrder;
+      }
       return null;
     }
   },
@@ -166,12 +219,16 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
       };
-      set((state) => ({
-        orders: [demoOrder, ...state.orders],
-        activeOrders: [demoOrder, ...state.activeOrders],
-        currentOrder: demoOrder,
-        isLoading: false,
-      }));
+      set((state) => {
+        const newActive = [demoOrder, ...state.activeOrders];
+        saveDemoOrders(newActive);
+        return {
+          orders: [demoOrder, ...state.orders],
+          activeOrders: newActive,
+          currentOrder: demoOrder,
+          isLoading: false,
+        };
+      });
       return demoOrder;
     }
   },
@@ -201,14 +258,17 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       }));
     } catch {
       // Demo mode: update locally
-      set((state) => ({
-        orders: state.orders.map((o) => (o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o)),
-        activeOrders:
-          status === 'CLOSED' || status === 'CANCELLED'
-            ? state.activeOrders.filter((o) => o.id !== id)
-            : state.activeOrders.map((o) => (o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o)),
-        currentOrder: state.currentOrder?.id === id ? { ...state.currentOrder, status, updatedAt: new Date().toISOString() } : state.currentOrder,
-      }));
+      set((state) => {
+        const newActive = status === 'CLOSED' || status === 'CANCELLED'
+          ? state.activeOrders.filter((o) => o.id !== id)
+          : state.activeOrders.map((o) => (o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o));
+        saveDemoOrders(newActive);
+        return {
+          orders: state.orders.map((o) => (o.id === id ? { ...o, status, updatedAt: new Date().toISOString() } : o)),
+          activeOrders: newActive,
+          currentOrder: state.currentOrder?.id === id ? { ...state.currentOrder, status, updatedAt: new Date().toISOString() } : state.currentOrder,
+        };
+      });
     }
   },
 
@@ -256,9 +316,11 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
           o.id === orderId
             ? { ...o, status: 'IN_PROGRESS' as OrderStatus, updatedAt: new Date().toISOString() }
             : o;
+        const newActive = state.activeOrders.map(updater);
+        saveDemoOrders(newActive);
         return {
           orders: state.orders.map(updater),
-          activeOrders: state.activeOrders.map(updater),
+          activeOrders: newActive,
           currentOrder:
             state.currentOrder?.id === orderId
               ? { ...state.currentOrder, status: 'IN_PROGRESS' as OrderStatus }
@@ -282,8 +344,13 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     } catch (err) {
       console.log('[ORDERS_STORE] fetchOrdersByTable error:', err);
       // Fallback: search activeOrders in memory
-      const fallback = get().activeOrders.filter((o) => o.tableId === tableId);
-      console.log('[ORDERS_STORE] fetchOrdersByTable fallback:', fallback.length, 'orders from memory');
+      let fallback = get().activeOrders.filter((o) => o.tableId === tableId);
+      // Also check persisted demo orders
+      if (fallback.length === 0) {
+        const demoOrders = loadDemoOrders();
+        fallback = demoOrders.filter((o) => o.tableId === tableId);
+      }
+      console.log('[ORDERS_STORE] fetchOrdersByTable fallback:', fallback.length, 'orders');
       return fallback;
     }
   },
