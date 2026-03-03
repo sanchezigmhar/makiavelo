@@ -34,7 +34,7 @@ import { useOrdersStore } from '@/store/orders.store';
 import { useTablesStore } from '@/store/tables.store';
 import { cn, formatCurrency } from '@/lib/utils';
 import type { Order, PaymentMethod } from '@/types';
-import api from '@/lib/api';
+import api, { normalizeOrder, normalizeOrders } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 const paymentMethods: { id: PaymentMethod; label: string; icon: React.ComponentType<{ className?: string }>; color: string }[] = [
@@ -148,7 +148,8 @@ function CobroPage() {
       if (!foundOrder && tableId) {
         try {
           const { data } = await api.get<Order[]>(`/orders/table/${tableId}`);
-          const orders = Array.isArray(data) ? data : [];
+          const rawOrders = Array.isArray(data) ? data : [];
+          const orders = normalizeOrders(rawOrders) as Order[];
           if (orders.length > 0) foundOrder = orders[0];
         } catch { /* demo */ }
       }
@@ -164,7 +165,7 @@ function CobroPage() {
         const storeTable = tables.find((t) => t.id === tableId) as any; // eslint-disable-line
         if (storeTable?.currentOrder) {
           const co = storeTable.currentOrder;
-          foundOrder = { ...co, tableId, table: { id: tableId, number: storeTable.number, name: storeTable.name, zoneId: storeTable.zoneId, capacity: storeTable.capacity, status: storeTable.status, isActive: true } };
+          foundOrder = normalizeOrder({ ...co, tableId, table: { id: tableId, number: storeTable.number, name: storeTable.name, zoneId: storeTable.zoneId, capacity: storeTable.capacity, status: storeTable.status, isActive: true } }) as Order;
         }
       }
 

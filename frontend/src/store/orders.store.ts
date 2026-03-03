@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Order, OrderStatus, OrderItem, PaginatedResponse } from '@/types';
-import api from '@/lib/api';
+import api, { normalizeOrder, normalizeOrders } from '@/lib/api';
 import toast from 'react-hot-toast';
 
 // Demo order number counter
@@ -89,7 +89,8 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     try {
       const { data } = await api.get<Order[]>('/orders/active');
       console.log('[ORDERS_STORE] fetchActiveOrders raw data:', Array.isArray(data) ? `${data.length} orders` : typeof data);
-      const orders = Array.isArray(data) ? data : [];
+      const rawOrders = Array.isArray(data) ? data : [];
+      const orders = normalizeOrders(rawOrders) as Order[];
       set({ activeOrders: orders });
     } catch (err) {
       console.log('[ORDERS_STORE] fetchActiveOrders error:', err);
@@ -100,9 +101,10 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   fetchOrder: async (id: string) => {
     try {
       const { data } = await api.get<Order>(`/orders/${id}`);
-      console.log('[ORDERS_STORE] fetchOrder result:', data ? `Order #${data.orderNumber} items=${data.items?.length}` : 'null');
-      set({ currentOrder: data });
-      return data;
+      const order = normalizeOrder(data) as Order;
+      console.log('[ORDERS_STORE] fetchOrder result:', order ? `Order #${order.orderNumber} items=${order.items?.length}` : 'null');
+      set({ currentOrder: order });
+      return order;
     } catch (err) {
       console.log('[ORDERS_STORE] fetchOrder error:', err);
       return null;
@@ -116,13 +118,14 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       const branchId = typeof window !== 'undefined' ? localStorage.getItem('maki_branch_id') : null;
       const payload = { ...orderData, branchId: branchId || undefined };
       const { data } = await api.post<Order>('/orders', payload);
+      const order = normalizeOrder(data) as Order;
       set((state) => ({
-        orders: [data, ...state.orders],
-        activeOrders: [data, ...state.activeOrders],
-        currentOrder: data,
+        orders: [order, ...state.orders],
+        activeOrders: [order, ...state.activeOrders],
+        currentOrder: order,
         isLoading: false,
       }));
-      return data;
+      return order;
     } catch {
       // Demo mode: create a local order with real names and prices from cart
       demoOrderCounter++;
@@ -212,10 +215,11 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   addItemsToOrder: async (orderId, items) => {
     try {
       const { data } = await api.post<Order>(`/orders/${orderId}/items`, { items });
+      const order = normalizeOrder(data) as Order;
       set((state) => ({
-        orders: state.orders.map((o) => (o.id === orderId ? data : o)),
-        activeOrders: state.activeOrders.map((o) => (o.id === orderId ? data : o)),
-        currentOrder: state.currentOrder?.id === orderId ? data : state.currentOrder,
+        orders: state.orders.map((o) => (o.id === orderId ? order : o)),
+        activeOrders: state.activeOrders.map((o) => (o.id === orderId ? order : o)),
+        currentOrder: state.currentOrder?.id === orderId ? order : state.currentOrder,
       }));
       toast.success('Items agregados');
     } catch {
@@ -226,10 +230,11 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   removeOrderItem: async (orderId, itemId) => {
     try {
       const { data } = await api.delete<Order>(`/orders/${orderId}/items/${itemId}`);
+      const order = normalizeOrder(data) as Order;
       set((state) => ({
-        orders: state.orders.map((o) => (o.id === orderId ? data : o)),
-        activeOrders: state.activeOrders.map((o) => (o.id === orderId ? data : o)),
-        currentOrder: state.currentOrder?.id === orderId ? data : state.currentOrder,
+        orders: state.orders.map((o) => (o.id === orderId ? order : o)),
+        activeOrders: state.activeOrders.map((o) => (o.id === orderId ? order : o)),
+        currentOrder: state.currentOrder?.id === orderId ? order : state.currentOrder,
       }));
     } catch {
       // handled by interceptor
@@ -267,7 +272,8 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
     console.log('[ORDERS_STORE] fetchOrdersByTable called for:', tableId);
     try {
       const { data } = await api.get<Order[]>(`/orders/table/${tableId}`);
-      const orders = Array.isArray(data) ? data : [];
+      const rawOrders = Array.isArray(data) ? data : [];
+      const orders = normalizeOrders(rawOrders) as Order[];
       console.log('[ORDERS_STORE] fetchOrdersByTable result:', orders.length, 'orders');
       if (orders.length > 0) {
         console.log('[ORDERS_STORE] First order:', orders[0].orderNumber, 'items:', orders[0].items?.length);

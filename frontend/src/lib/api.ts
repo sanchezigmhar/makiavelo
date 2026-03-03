@@ -115,6 +115,43 @@ api.interceptors.response.use(
   }
 );
 
+// ============================================================
+// Normalize backend data → frontend types
+// Backend uses: tax, item.subtotal, item.product.name
+// Frontend uses: taxAmount, item.totalPrice, item.name
+// ============================================================
+// eslint-disable-next-line
+export function normalizeOrderItem(item: any): any {
+  if (!item || typeof item !== 'object') return item;
+  return {
+    ...item,
+    name: item.name || item.product?.name || `Producto`,
+    totalPrice: item.totalPrice ?? item.subtotal ?? (item.unitPrice || 0) * (item.quantity || 1),
+    courseType: item.courseType || item.product?.courseType || item.station || 'PLATO_FUERTE',
+    sortOrder: item.sortOrder ?? 0,
+  };
+}
+
+// eslint-disable-next-line
+export function normalizeOrder(order: any): any {
+  if (!order || typeof order !== 'object') return order;
+  // Only normalize if it looks like a backend order (has 'tax' instead of 'taxAmount')
+  const items = Array.isArray(order.items) ? order.items.map(normalizeOrderItem) : order.items;
+  return {
+    ...order,
+    items,
+    taxAmount: order.taxAmount ?? order.tax ?? 0,
+    tipAmount: order.tipAmount ?? 0,
+    discountAmount: order.discountAmount ?? 0,
+  };
+}
+
+// eslint-disable-next-line
+export function normalizeOrders(data: any): any {
+  if (Array.isArray(data)) return data.map(normalizeOrder);
+  return data;
+}
+
 export default api;
 
 // Typed API helpers
