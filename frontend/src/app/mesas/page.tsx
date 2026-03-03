@@ -1118,6 +1118,13 @@ export default function MesasPage() {
         if (saved) tableOrderLinks = JSON.parse(saved);
       } catch { /* ignore */ }
 
+      // Also load demo orders from localStorage for status detection
+      let demoOrdersForStatus: { id: string; tableId?: string; status: string }[] = [];
+      try {
+        const stored = localStorage.getItem('makiavelo-demo-orders');
+        if (stored) demoOrdersForStatus = JSON.parse(stored);
+      } catch { /* ignore */ }
+
       const demoCanvas: CanvasTable[] = storeTables
         .filter((t) => !mergedOriginalIds.has(t.id)) // Skip tables absorbed into a merge
         .map((t) => {
@@ -1127,7 +1134,14 @@ export default function MesasPage() {
           const savedPos = savedPositions.get(t.id);
           const savedLink = tableOrderLinks[t.id];
           // Also check activeOrders for this table's order
-          const storeOrder = activeOrders.find((o) => o.tableId === t.id);
+          const storeOrder = activeOrders.find((o) => o.tableId === t.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
+          // Check demo orders in localStorage for active orders on this table
+          const demoOrder = demoOrdersForStatus.find((o) => o.tableId === t.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
+
+          // Determine actual status: if there's an active order from ANY source, mesa is OCCUPIED
+          const hasActiveOrder = !!(activeOrder || storeOrder || demoOrder || (savedLink?.orderId));
+          const effectiveStatus = hasActiveOrder ? 'OCCUPIED' as TableStatus : t.status;
+
           return {
             id: t.id,
             number: t.number,
@@ -1135,14 +1149,14 @@ export default function MesasPage() {
             zoneId: t.zone?.id || t.zoneId,
             zoneName: t.zone?.name || 'Salon',
             capacity: t.capacity || 2,
-            status: t.status,
+            status: effectiveStatus,
             shape: (t.shape === 'bar' ? 'bar-segment' : t.shape === 'rect' ? 'rect-horizontal' : t.shape || 'round') as TableShape,
             x: savedPos?.x ?? t.posX ?? (80 + ((t.number - 1) % 6) * 140),
             y: savedPos?.y ?? t.posY ?? (80 + Math.floor((t.number - 1) / 6) * 160),
-            occupiedAt: t.occupiedAt || activeOrder?.createdAt || savedLink?.occupiedAt,
+            occupiedAt: t.occupiedAt || activeOrder?.createdAt || savedLink?.occupiedAt || (hasActiveOrder ? new Date().toISOString() : undefined),
             orderTotal: activeOrder?.total || storeOrder?.total || savedLink?.orderTotal,
             serverName: serverUser?.name,
-            currentOrderId: tAny.currentOrderId || activeOrder?.id || savedLink?.orderId || storeOrder?.id,
+            currentOrderId: tAny.currentOrderId || activeOrder?.id || savedLink?.orderId || storeOrder?.id || demoOrder?.id,
           };
         });
 
