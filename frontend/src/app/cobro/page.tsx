@@ -97,8 +97,15 @@ function CobroPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [showSplitBill, setShowSplitBill] = useState(false);
+
+  // Split payment state
+  const [splitMode, setSplitMode] = useState<'full' | 'equal' | 'by-items'>('full');
   const [splitCount, setSplitCount] = useState(2);
+  const [currentSplitPerson, setCurrentSplitPerson] = useState(1);
+  const [paymentsCompleted, setPaymentsCompleted] = useState<{ person: number; amount: number; method: string; tip: number }[]>([]);
+  const [totalPaidSoFar, setTotalPaidSoFar] = useState(0);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [paidItemIds, setPaidItemIds] = useState<Set<string>>(new Set());
 
   // DGI Factura Electronica state
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -169,7 +176,19 @@ function CobroPage() {
         }
       }
 
-      if (foundOrder) setSelectedOrder(foundOrder);
+      if (foundOrder) {
+        setSelectedOrder(foundOrder);
+        // Check for existing partial payments
+        try {
+          const { data: paymentData } = await api.get(`/payments/${foundOrder.id}`);
+          const summary = (paymentData as any)?.summary;
+          if (summary && summary.totalPaid > 0 && !summary.isFullyPaid) {
+            setTotalPaidSoFar(summary.totalPaid);
+            setSplitMode('equal');
+            toast(`Pagos previos: ${formatCurrency(summary.totalPaid)} | Restante: ${formatCurrency(summary.remaining)}`, { icon: '💳', duration: 4000 });
+          }
+        } catch { /* no previous payments or demo */ }
+      }
       setIsLoading(false);
     };
     load();
@@ -178,9 +197,33 @@ function CobroPage() {
   const order = selectedOrder || demoOrder;
   const tipAmount = useCustomTip ? parseFloat(customTip || '0') : (order.subtotal * tipPercent) / 100;
   const totalWithTip = order.total + tipAmount;
+  const remainingBalance = totalWithTip - totalPaidSoFar;
+
+  // Calculate current payment amount based on split mode
+  const currentPaymentAmount = useMemo(() => {
+    if (splitMode === 'full') return remainingBalance;
+    if (splitMode === 'equal') {
+      const perPerson = Math.floor((totalWithTip / splitCount) * 100) / 100;
+      // Last person pays the remainder to avoid rounding issues
+      if (currentSplitPerson >= splitCount) return +(remainingBalance).toFixed(2);
+      return perPerson;
+    }
+    if (splitMode === 'by-items') {
+      // Sum selected items + proportional tax and tip
+      const selectedItems = order.items.filter((i) => selectedItemIds.has(i.id));
+      const selectedSubtotal = selectedItems.reduce((sum, i) => sum + i.totalPrice, 0);
+      if (selectedSubtotal === 0) return 0;
+      const proportion = selectedSubtotal / order.subtotal;
+      return +(selectedSubtotal + (order.taxAmount * proportion) + (tipAmount * proportion)).toFixed(2);
+    }
+    return remainingBalance;
+  }, [splitMode, splitCount, currentSplitPerson, totalWithTip, remainingBalance, order, selectedItemIds, tipAmount]);
+
   const cashValue = parseFloat(cashAmount || '0');
-  const change = selectedMethod === 'CASH' ? Math.max(0, cashValue - totalWithTip) : 0;
-  const canProcess = selectedMethod !== 'CASH' || cashValue >= totalWithTip;
+  const change = selectedMethod === 'CASH' ? Math.max(0, cashValue - currentPaymentAmount) : 0;
+  const canProcess = splitMode === 'by-items'
+    ? selectedItemIds.size > 0 && (selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount)
+    : selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount;
   const resolvedTableId = searchParams?.get('tableId') || order.tableId || null;
 
   const cleanupTableStorage = (tId: string | null) => {
@@ -197,19 +240,63 @@ function CobroPage() {
     setIsProcessing(true);
     const backendMethodMap: Record<string, string> = { 'CASH': 'CASH', 'CARD': 'CREDIT_CARD', 'YAPPY': 'TRANSFER', 'TRANSFER': 'TRANSFER', 'OTHER': 'OTHER' };
     const backendMethod = backendMethodMap[selectedMethod] || selectedMethod;
+    const paymentAmount = currentPaymentAmount;
+    const proportionalTip = splitMode === 'full' ? tipAmount : +(tipAmount * (paymentAmount / totalWithTip)).toFixed(2);
+
+    let isLastPayment = false;
 
     try {
-      await api.post(`/payments`, { orderId: order.id, method: backendMethod, amount: totalWithTip, tip: tipAmount, reference: selectedMethod !== 'CASH' ? `${selectedMethod}-${Date.now()}` : undefined });
-      if (resolvedTableId) { try { await updateTableStatus(resolvedTableId, 'AVAILABLE'); } catch { /* */ } }
-      cleanupTableStorage(resolvedTableId);
+      const { data: paymentResult } = await api.post(`/payments`, {
+        orderId: order.id,
+        method: backendMethod,
+        amount: paymentAmount,
+        tip: proportionalTip,
+        reference: selectedMethod !== 'CASH' ? `${selectedMethod}-${Date.now()}` : undefined,
+      });
+      // Check if fully paid from backend response
+      const summary = (paymentResult as any)?.summary;
+      isLastPayment = summary?.isFullyPaid || (totalPaidSoFar + paymentAmount >= totalWithTip - 0.01);
+      if (isLastPayment) {
+        if (resolvedTableId) { try { await updateTableStatus(resolvedTableId, 'AVAILABLE'); } catch { /* */ } }
+        cleanupTableStorage(resolvedTableId);
+      }
     } catch {
-      await updateOrderStatus(order.id, 'CLOSED');
-      if (resolvedTableId) await updateTableStatus(resolvedTableId, 'AVAILABLE');
-      cleanupTableStorage(resolvedTableId);
+      // Demo fallback
+      isLastPayment = (totalPaidSoFar + paymentAmount >= totalWithTip - 0.01);
+      if (isLastPayment) {
+        await updateOrderStatus(order.id, 'CLOSED');
+        if (resolvedTableId) await updateTableStatus(resolvedTableId, 'AVAILABLE');
+        cleanupTableStorage(resolvedTableId);
+      }
+    }
+
+    // Track this payment
+    const newPaid = totalPaidSoFar + paymentAmount;
+    setTotalPaidSoFar(newPaid);
+    setPaymentsCompleted((prev) => [...prev, { person: currentSplitPerson, amount: paymentAmount, method: selectedMethod, tip: proportionalTip }]);
+
+    // Mark items as paid in by-items mode
+    if (splitMode === 'by-items') {
+      setPaidItemIds((prev) => {
+        const next = new Set(prev);
+        selectedItemIds.forEach((id) => next.add(id));
+        return next;
+      });
+      setSelectedItemIds(new Set());
     }
 
     setIsProcessing(false);
-    setShowInvoiceModal(true);
+
+    if (isLastPayment) {
+      // Final payment — show invoice modal
+      setShowInvoiceModal(true);
+    } else {
+      // Partial payment — prepare for next person
+      setCurrentSplitPerson((p) => p + 1);
+      setCashAmount('');
+      setSelectedMethod('CASH');
+      toast.success(`Pago ${currentSplitPerson} registrado (${formatCurrency(paymentAmount)}) | Restante: ${formatCurrency(totalWithTip - newPaid)}`, { duration: 3000 });
+    }
   };
 
   // ============================================================
@@ -261,6 +348,9 @@ function CobroPage() {
     setShowSuccess(false); setShowInvoiceModal(false); setSelectedOrder(null);
     setCashAmount(''); setTipPercent(10); setUseCustomTip(false);
     setDgiStep('idle'); setDgiResponse(null);
+    setSplitMode('full'); setSplitCount(2); setCurrentSplitPerson(1);
+    setPaymentsCompleted([]); setTotalPaidSoFar(0);
+    setSelectedItemIds(new Set()); setPaidItemIds(new Set());
     router.push('/mesas');
   };
 
@@ -319,29 +409,127 @@ function CobroPage() {
             {useCustomTip && <div className="mt-3"><NumPad value={customTip} onChange={setCustomTip} label="Monto de propina" showCurrency /></div>}
           </Card>
 
-          {/* Split bill */}
+          {/* Split bill - 3 modes */}
           <Card className="mb-4">
-            <button onClick={() => setShowSplitBill(!showSplitBill)} className="w-full flex items-center justify-between min-h-[48px] touch-manipulation">
-              <span className="flex items-center gap-2 font-bold text-maki-dark"><UserGroupIcon className="w-5 h-5" />Dividir Cuenta</span>
-              <span className="text-maki-gray text-sm">{showSplitBill ? 'Ocultar' : 'Expandir'}</span>
-            </button>
-            {showSplitBill && (
+            <h3 className="text-touch-base font-bold text-maki-dark mb-3 flex items-center gap-2"><UserGroupIcon className="w-5 h-5" />Tipo de Pago</h3>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {([
+                { id: 'full' as const, label: 'Completa', desc: 'Un solo pago' },
+                { id: 'equal' as const, label: 'Partes Iguales', desc: 'Dividir entre personas' },
+                { id: 'by-items' as const, label: 'Por Items', desc: 'Seleccionar productos' },
+              ]).map((mode) => (
+                <motion.button key={mode.id} whileTap={{ scale: 0.96 }}
+                  onClick={() => { setSplitMode(mode.id); setCurrentSplitPerson(1); setPaymentsCompleted([]); setTotalPaidSoFar(0); setSelectedItemIds(new Set()); setPaidItemIds(new Set()); setCashAmount(''); }}
+                  className={cn('min-h-[64px] rounded-xl p-2 text-center transition-all touch-manipulation border-2',
+                    splitMode === mode.id ? 'border-maki-gold bg-maki-gold/5' : 'border-gray-200 hover:border-gray-300')}>
+                  <p className={cn('text-sm font-bold', splitMode === mode.id ? 'text-maki-gold' : 'text-maki-dark')}>{mode.label}</p>
+                  <p className="text-[11px] text-maki-gray">{mode.desc}</p>
+                </motion.button>
+              ))}
+            </div>
+
+            {/* Equal split options */}
+            {splitMode === 'equal' && (
               <div className="mt-3 pt-3 border-t border-gray-100">
-                <div className="flex items-center justify-center gap-4 mb-3">
+                <p className="text-sm font-semibold text-maki-dark mb-2">Numero de personas</p>
+                <div className="flex items-center justify-center gap-3 mb-3">
                   {[2, 3, 4, 5, 6].map((n) => (
-                    <motion.button key={n} whileTap={{ scale: 0.9 }} onClick={() => setSplitCount(n)}
-                      className={cn('w-14 h-14 rounded-xl font-bold text-touch-lg transition-all touch-manipulation', splitCount === n ? 'bg-maki-dark text-white' : 'bg-gray-100 text-maki-gray hover:bg-gray-200')}>
+                    <motion.button key={n} whileTap={{ scale: 0.9 }} onClick={() => { setSplitCount(n); setCurrentSplitPerson(1); setPaymentsCompleted([]); setTotalPaidSoFar(0); setCashAmount(''); }}
+                      className={cn('w-12 h-12 rounded-xl font-bold text-touch-base transition-all touch-manipulation', splitCount === n ? 'bg-maki-dark text-white' : 'bg-gray-100 text-maki-gray hover:bg-gray-200')}>
                       {n}
                     </motion.button>
                   ))}
                 </div>
                 <div className="text-center p-3 bg-maki-light rounded-xl">
                   <p className="text-sm text-maki-gray">Cada persona paga</p>
-                  <p className="text-touch-2xl font-bold text-maki-dark">{formatCurrency(totalWithTip / splitCount)}</p>
+                  <p className="text-touch-xl font-bold text-maki-dark">{formatCurrency(totalWithTip / splitCount)}</p>
                 </div>
+                {paymentsCompleted.length > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-xl">
+                    <p className="text-sm font-bold text-blue-800 mb-1">Pagando: Persona {currentSplitPerson} de {splitCount}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* By-items selection */}
+            {splitMode === 'by-items' && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-sm font-semibold text-maki-dark mb-2">Selecciona items para este pago</p>
+                <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                  {order.items.map((item) => {
+                    const isPaid = paidItemIds.has(item.id);
+                    const isSelected = selectedItemIds.has(item.id);
+                    return (
+                      <motion.button key={item.id} whileTap={{ scale: 0.98 }} disabled={isPaid}
+                        onClick={() => {
+                          setSelectedItemIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(item.id)) next.delete(item.id);
+                            else next.add(item.id);
+                            return next;
+                          });
+                        }}
+                        className={cn('w-full flex items-center justify-between p-2.5 rounded-xl transition-all touch-manipulation text-left',
+                          isPaid ? 'bg-emerald-50 border border-emerald-200 opacity-60' :
+                          isSelected ? 'bg-maki-gold/10 border-2 border-maki-gold' : 'bg-gray-50 border border-gray-200 hover:border-gray-300')}>
+                        <div className="flex items-center gap-2">
+                          <div className={cn('w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0',
+                            isPaid ? 'bg-emerald-500 border-emerald-500' : isSelected ? 'bg-maki-gold border-maki-gold' : 'border-gray-300')}>
+                            {(isPaid || isSelected) && <CheckCircleIcon className="w-3.5 h-3.5 text-white" />}
+                          </div>
+                          <span className={cn('text-sm font-medium', isPaid ? 'text-emerald-700 line-through' : 'text-maki-dark')}>
+                            {item.quantity}x {item.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isPaid && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">PAGADO</span>}
+                          <span className={cn('text-sm font-semibold', isPaid ? 'text-emerald-600' : 'text-maki-dark')}>{formatCurrency(item.totalPrice)}</span>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+                {selectedItemIds.size > 0 && (
+                  <div className="mt-2 p-2 bg-maki-light rounded-xl text-center">
+                    <p className="text-sm text-maki-gray">{selectedItemIds.size} item{selectedItemIds.size > 1 ? 's' : ''} seleccionado{selectedItemIds.size > 1 ? 's' : ''}</p>
+                    <p className="text-touch-lg font-bold text-maki-dark">{formatCurrency(currentPaymentAmount)}</p>
+                  </div>
+                )}
               </div>
             )}
           </Card>
+
+          {/* Payment progress bar (when partial payments exist) */}
+          {(splitMode !== 'full' && (paymentsCompleted.length > 0 || totalPaidSoFar > 0)) && (
+            <Card className="mb-4">
+              <h3 className="text-sm font-bold text-maki-dark mb-2">Progreso de Pago</h3>
+              <div className="w-full bg-gray-200 rounded-full h-3 mb-2">
+                <motion.div className="bg-emerald-500 h-3 rounded-full" initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, (totalPaidSoFar / totalWithTip) * 100)}%` }}
+                  transition={{ duration: 0.5 }} />
+              </div>
+              <div className="flex justify-between text-xs text-maki-gray">
+                <span>Pagado: <span className="font-bold text-emerald-600">{formatCurrency(totalPaidSoFar)}</span></span>
+                <span>Restante: <span className="font-bold text-maki-dark">{formatCurrency(remainingBalance)}</span></span>
+              </div>
+              {paymentsCompleted.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {paymentsCompleted.map((p, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 bg-emerald-50 rounded-lg">
+                      <span className="text-emerald-700 font-medium">
+                        {splitMode === 'equal' ? `Persona ${p.person}` : `Pago ${idx + 1}`}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <span className="text-gray-500">{p.method}</span>
+                        <span className="font-bold text-emerald-700">{formatCurrency(p.amount)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Print receipt toggle */}
           <div className="flex items-center justify-between p-4 bg-white rounded-2xl shadow-card">
@@ -368,13 +556,13 @@ function CobroPage() {
             {selectedMethod === 'CASH' && (
               <div>
                 <h3 className="text-touch-base font-bold text-maki-dark mb-3">Monto Recibido</h3>
-                <QuickAmounts amounts={[20, 50, 100, totalWithTip]} onSelect={(amount) => setCashAmount(amount.toString())} className="mb-4" />
+                <QuickAmounts amounts={[20, 50, 100, currentPaymentAmount]} onSelect={(amount) => setCashAmount(amount.toString())} className="mb-4" />
                 <NumPad value={cashAmount} onChange={setCashAmount} showCurrency />
                 {cashValue > 0 && (
-                  <div className={cn('mt-4 p-4 rounded-2xl text-center', cashValue >= totalWithTip ? 'bg-emerald-50' : 'bg-red-50')}>
+                  <div className={cn('mt-4 p-4 rounded-2xl text-center', cashValue >= currentPaymentAmount ? 'bg-emerald-50' : 'bg-red-50')}>
                     <p className="text-sm text-maki-gray">Cambio</p>
-                    <p className={cn('text-touch-3xl font-bold', cashValue >= totalWithTip ? 'text-emerald-600' : 'text-red-600')}>
-                      {cashValue >= totalWithTip ? formatCurrency(change) : `Faltan ${formatCurrency(totalWithTip - cashValue)}`}
+                    <p className={cn('text-touch-3xl font-bold', cashValue >= currentPaymentAmount ? 'text-emerald-600' : 'text-red-600')}>
+                      {cashValue >= currentPaymentAmount ? formatCurrency(change) : `Faltan ${formatCurrency(currentPaymentAmount - cashValue)}`}
                     </p>
                   </div>
                 )}
@@ -384,7 +572,7 @@ function CobroPage() {
             {selectedMethod !== 'CASH' && (
               <div className="text-center p-6 bg-maki-light rounded-2xl">
                 <p className="text-sm text-maki-gray mb-2">Total a cobrar</p>
-                <p className="text-touch-3xl font-bold text-maki-dark">{formatCurrency(totalWithTip)}</p>
+                <p className="text-touch-3xl font-bold text-maki-dark">{formatCurrency(currentPaymentAmount)}</p>
                 <p className="text-sm text-maki-gray mt-2">
                   {selectedMethod === 'CARD' && 'Pasa la tarjeta por el terminal'}
                   {selectedMethod === 'YAPPY' && 'El cliente debe confirmar en Yappy'}
@@ -396,7 +584,9 @@ function CobroPage() {
 
           <div className="p-6 border-t border-gray-100">
             <Button variant="success" size="xl" fullWidth loading={isProcessing} disabled={!canProcess} onClick={handleProcessPayment} icon={<CheckCircleIcon className="w-6 h-6" />}>
-              Cobrar {formatCurrency(totalWithTip)}
+              {splitMode === 'full' && `Cobrar ${formatCurrency(currentPaymentAmount)}`}
+              {splitMode === 'equal' && `Cobrar ${formatCurrency(currentPaymentAmount)} (Persona ${currentSplitPerson}/${splitCount})`}
+              {splitMode === 'by-items' && (selectedItemIds.size > 0 ? `Cobrar ${formatCurrency(currentPaymentAmount)} (${selectedItemIds.size} item${selectedItemIds.size > 1 ? 's' : ''})` : 'Selecciona items')}
             </Button>
           </div>
         </div>

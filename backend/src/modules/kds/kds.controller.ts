@@ -15,6 +15,11 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 export class KdsController {
   constructor(private readonly kdsService: KdsService) {}
 
+  @Get('orders')
+  getKdsOrders(@Query('branchId') branchId?: string) {
+    return this.kdsService.getKdsOrders(branchId);
+  }
+
   @Get('station/:station')
   getItemsByStation(
     @Param('station') station: string,

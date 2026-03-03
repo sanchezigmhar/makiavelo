@@ -10,6 +10,60 @@ export class KdsService {
     private eventsGateway: EventsGateway,
   ) {}
 
+  async getKdsOrders(branchId?: string) {
+    const where: any = {
+      status: { in: ['IN_PROGRESS'] },
+      items: { some: { status: { in: ['PENDING', 'PREPARING'] } } },
+    };
+    if (branchId) where.branchId = branchId;
+
+    const orders = await this.prisma.order.findMany({
+      where,
+      include: {
+        table: { select: { id: true, number: true, name: true } },
+        user: { select: { firstName: true, lastName: true } },
+        items: {
+          where: { status: { in: ['PENDING', 'PREPARING', 'READY'] } },
+          include: {
+            product: { select: { name: true, station: true } },
+            modifiers: { include: { modifierOption: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { openedAt: 'asc' },
+    });
+
+    return orders.map((order: any) => {
+      const created = new Date(order.openedAt || order.createdAt);
+      const elapsedMin = Math.floor(
+        (Date.now() - created.getTime()) / 60000,
+      );
+      return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        tableNumber: order.table?.number,
+        tableName: order.table?.name || 'Para Llevar',
+        items: order.items.map((item: any) => ({
+          id: item.id,
+          name: item.product?.name || 'Item',
+          quantity: item.quantity,
+          status: item.status,
+          station: item.station || item.product?.station || null,
+          modifiers: item.modifiers
+            ?.map((m: any) => m.modifierOption?.name)
+            .filter(Boolean),
+          notes: item.notes,
+        })),
+        createdAt: (order.openedAt || order.createdAt).toISOString(),
+        elapsedMinutes: elapsedMin,
+        serverName:
+          `${order.user?.firstName || ''} ${order.user?.lastName || ''}`.trim(),
+        status: elapsedMin >= 15 ? 'LATE' : 'NEW',
+      };
+    });
+  }
+
   async getItemsByStation(station: string, branchId?: string) {
     const where: any = {
       station,

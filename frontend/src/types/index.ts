@@ -464,6 +464,7 @@ export interface KdsOrderItem {
   notes?: string;
   status: OrderItemStatus;
   courseType: CourseType;
+  station?: string;
 }
 
 // ========== Pagination ==========
