@@ -20,6 +20,7 @@ import {
   ArrowPathIcon,
   DocumentDuplicateIcon,
   XMarkIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import MainLayout from '@/components/layout/MainLayout';
 import Header from '@/components/layout/Header';
@@ -32,6 +33,7 @@ import Modal from '@/components/ui/Modal';
 import { PageLoader } from '@/components/ui/LoadingSpinner';
 import { useOrdersStore } from '@/store/orders.store';
 import { useTablesStore } from '@/store/tables.store';
+import { useNotificationsStore } from '@/store/notifications.store';
 import { cn, formatCurrency } from '@/lib/utils';
 import type { Order, PaymentMethod } from '@/types';
 import api, { normalizeOrder, normalizeOrders } from '@/lib/api';
@@ -95,6 +97,7 @@ function CobroPage() {
   const [useCustomTip, setUseCustomTip] = useState(false);
   const [printReceipt, setPrintReceipt] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showCleanupDialog, setShowCleanupDialog] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -293,7 +296,7 @@ function CobroPage() {
       const summary = (paymentResult as any)?.summary;
       isLastPayment = summary?.isFullyPaid || (totalPaidSoFar + paymentAmount >= totalWithTip - 0.01);
       if (isLastPayment) {
-        if (resolvedTableId) { try { await updateTableStatus(resolvedTableId, 'AVAILABLE'); } catch { /* */ } }
+        // Don't change table status yet — user will choose limpieza or disponible
         cleanupTableStorage(resolvedTableId);
       }
     } catch {
@@ -301,7 +304,7 @@ function CobroPage() {
       isLastPayment = (totalPaidSoFar + paymentAmount >= totalWithTip - 0.01);
       if (isLastPayment) {
         await updateOrderStatus(order.id, 'CLOSED');
-        if (resolvedTableId) await updateTableStatus(resolvedTableId, 'AVAILABLE');
+        // Don't change table status yet — user will choose limpieza or disponible
         cleanupTableStorage(resolvedTableId);
       }
     }
@@ -378,10 +381,39 @@ function CobroPage() {
     }
   }, [order, invoiceType, invoiceRuc, invoiceBusinessName]);
 
-  const handleSkipInvoice = () => { setShowInvoiceModal(false); setShowSuccess(true); };
+  const handleSkipInvoice = () => { setShowInvoiceModal(false); setShowCleanupDialog(true); };
+
+  const handleTableCleanup = async (sendToCleaning: boolean) => {
+    setShowCleanupDialog(false);
+    if (resolvedTableId) {
+      const newStatus = sendToCleaning ? 'CLEANING' : 'AVAILABLE';
+      try { await updateTableStatus(resolvedTableId, newStatus as any); } catch { /* demo */ }
+    }
+    // Clear notifications for this table
+    try {
+      const tableNum = resolvedTableId ? parseInt(resolvedTableId.replace(/\D/g, '') || '0', 10) : 0;
+      const { readyItems, markDelivered } = useNotificationsStore.getState();
+      readyItems
+        .filter((n) => n.tableNumber === tableNum || n.orderId === order.id)
+        .forEach((n) => markDelivered(n.id));
+    } catch { /* ignore */ }
+    // Clear bumped order from KDS localStorage
+    try {
+      const bumpedKey = 'makiavelo-kds-bumped';
+      const saved = localStorage.getItem(bumpedKey);
+      if (saved) {
+        const bumped = JSON.parse(saved) as string[];
+        const filtered = bumped.filter((id) => id !== order.id);
+        localStorage.setItem(bumpedKey, JSON.stringify(filtered));
+      }
+    } catch { /* ignore */ }
+
+    setShowSuccess(true);
+  };
 
   const handleDone = () => {
-    setShowSuccess(false); setShowInvoiceModal(false); setSelectedOrder(null);
+    setShowSuccess(false); setShowInvoiceModal(false); setShowCleanupDialog(false);
+    setSelectedOrder(null);
     setCashAmount(''); setTipPercent(10); setUseCustomTip(false);
     setDgiStep('idle'); setDgiResponse(null);
     setSplitMode('full'); setSplitCount(2); setCurrentSplitPerson(1);
@@ -880,7 +912,7 @@ function CobroPage() {
 
                   <div className="flex gap-3 mt-6">
                     <Button variant="ghost" size="lg" icon={<PrinterIcon className="w-5 h-5" />} className="flex-1" onClick={() => toast('Enviando a impresora...', { icon: '🖨️' })}>Imprimir</Button>
-                    <Button variant="primary" size="lg" onClick={handleDone} className="flex-1" icon={<CheckCircleIcon className="w-5 h-5" />}>Listo</Button>
+                    <Button variant="primary" size="lg" onClick={() => { setShowInvoiceModal(false); setShowCleanupDialog(true); }} className="flex-1" icon={<CheckCircleIcon className="w-5 h-5" />}>Listo</Button>
                   </div>
                 </div>
               )}
@@ -902,18 +934,44 @@ function CobroPage() {
         )}
       </AnimatePresence>
 
-      {/* Success Modal (when skipping invoice) */}
+      {/* Cleanup Dialog — ask if mesa should go to cleaning */}
+      <Modal isOpen={showCleanupDialog} onClose={() => handleTableCleanup(false)} showClose={false} closeOnOverlay={false} size="sm">
+        <div className="text-center py-6">
+          <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            className="w-20 h-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+            <CheckCircleIcon className="w-12 h-12 text-emerald-600" />
+          </motion.div>
+          <h2 className="text-touch-xl font-bold text-maki-dark mb-1">Pago Exitoso</h2>
+          <p className="text-maki-gray mb-1">Orden #{order.orderNumber} cobrada</p>
+          <p className="text-lg font-bold text-emerald-600 mb-4">{formatCurrency(totalWithTip)}</p>
+          {selectedMethod === 'CASH' && change > 0 && <p className="text-touch-lg font-semibold text-maki-gold mb-4">Cambio: {formatCurrency(change)}</p>}
+
+          <div className="border-t border-gray-200 pt-4 mt-2">
+            <p className="text-sm font-semibold text-maki-dark mb-3">¿Enviar mesa a limpieza?</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Button variant="secondary" size="lg" fullWidth onClick={() => handleTableCleanup(true)}
+                icon={<SparklesIcon className="w-5 h-5" />}>
+                Si, limpiar
+              </Button>
+              <Button variant="success" size="lg" fullWidth onClick={() => handleTableCleanup(false)}
+                icon={<CheckCircleIcon className="w-5 h-5" />}>
+                No, disponible
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Success Modal (final confirmation) */}
       <Modal isOpen={showSuccess} onClose={handleDone} showClose={false} closeOnOverlay={false} size="sm">
         <div className="text-center py-6">
           <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}
             className="w-24 h-24 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
             <CheckCircleIcon className="w-14 h-14 text-emerald-600" />
           </motion.div>
-          <h2 className="text-touch-2xl font-bold text-maki-dark mb-2">Pago Exitoso</h2>
-          <p className="text-maki-gray mb-1">Orden #{order.orderNumber} cobrada</p>
-          <p className="text-touch-xl font-bold text-emerald-600 mb-1">{formatCurrency(totalWithTip)}</p>
-          {selectedMethod === 'CASH' && change > 0 && <p className="text-touch-lg font-semibold text-maki-gold">Cambio: {formatCurrency(change)}</p>}
-          <Button variant="primary" size="lg" fullWidth onClick={handleDone} className="mt-6">Listo</Button>
+          <h2 className="text-touch-2xl font-bold text-maki-dark mb-2">Mesa Lista</h2>
+          <p className="text-maki-gray mb-1">Orden #{order.orderNumber} cerrada</p>
+          <Button variant="primary" size="lg" fullWidth onClick={handleDone} className="mt-6">Volver a Mesas</Button>
         </div>
       </Modal>
     </MainLayout>
