@@ -181,7 +181,7 @@ function KdsPage() {
         return {
           id: o.id,
           orderNumber: o.orderNumber,
-          tableNumber: 0,
+          tableNumber: parseInt(o.tableId?.replace(/\D/g, '') || '0', 10),
           tableName: o.tableId
             ? (() => {
                 // Try multiple localStorage keys for table name resolution

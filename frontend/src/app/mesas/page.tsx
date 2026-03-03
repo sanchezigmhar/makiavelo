@@ -2184,9 +2184,12 @@ export default function MesasPage() {
                         isMergeTarget={false}
                         isMergedTable={!!table.isMerged}
                         colorOverride={
-                          // Green when food is READY for this table
+                          // Fuchsia when food is READY for this table
                           table.status === 'OCCUPIED' &&
-                          readyItems.some((n) => n.status === 'READY' && n.tableNumber === table.number)
+                          readyItems.some((n) => n.status === 'READY' && (
+                            n.tableNumber === table.number ||
+                            n.tableName === table.name
+                          ))
                             ? '#D946EF' // Fuchsia-500: food is ready!
                             : undefined
                         }
@@ -2226,7 +2229,7 @@ export default function MesasPage() {
                       {/* Ready items badge - notification for mesero */}
                       {!isDimmed && (() => {
                         const readyCount = readyItems.filter(
-                          (n) => n.status === 'READY' && n.tableNumber === table.number
+                          (n) => n.status === 'READY' && (n.tableNumber === table.number || n.tableName === table.name)
                         ).length;
                         if (readyCount === 0) return null;
                         return (
