@@ -82,7 +82,7 @@ export default function KdsPageWrapper() {
 function KdsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { activeOrders } = useOrdersStore();
+  const { activeOrders, updateOrderStatus } = useOrdersStore();
   const { user, logout } = useAuthStore();
   const roleSlug = user?.role?.slug || '';
 
@@ -97,6 +97,7 @@ function KdsPage() {
   const kdsTitle = ROLE_KDS_TITLE[roleSlug] || '🔥 Cocina';
 
   const [orders, setOrders] = useState<KdsOrder[]>([]);
+  const [bumpedOrderIds, setBumpedOrderIds] = useState<Set<string>>(new Set());
   const [selectedStation, setSelectedStation] = useState(defaultStation);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -173,7 +174,7 @@ function KdsPage() {
   // Convert active orders from orders store (sent from pedidos) to KDS format
   const storeKdsOrders: KdsOrder[] = useMemo(() => {
     return activeOrders
-      .filter((o) => o.status === 'IN_PROGRESS' || o.status === 'OPEN')
+      .filter((o) => (o.status === 'IN_PROGRESS' || o.status === 'OPEN') && !bumpedOrderIds.has(o.id))
       .map((o) => {
         const created = new Date(o.createdAt);
         const elapsedMin = Math.floor((Date.now() - created.getTime()) / 60000);
@@ -220,7 +221,7 @@ function KdsPage() {
           notes: o.notes,
         };
       });
-  }, [activeOrders]);
+  }, [activeOrders, bumpedOrderIds]);
 
   // Merge store orders with demo/API orders, avoiding duplicates
   const displayOrders = useMemo(() => {
@@ -305,6 +306,10 @@ function KdsPage() {
       toast.success(`Orden #${order.orderNumber} LISTA`, { duration: 2000 });
       // Remove this order from the full list and save
       setOrders(allOrders.filter((o) => o.id !== orderId));
+      // Mark as bumped so storeKdsOrders won't re-add it
+      setBumpedOrderIds((prev) => new Set(prev).add(orderId));
+      // Update Zustand store so the order is no longer IN_PROGRESS
+      updateOrderStatus(orderId, 'CLOSED').catch(() => { /* demo mode */ });
     } else {
       // NEW/LATE → PREPARING
       setOrders(allOrders.map((o) =>
@@ -335,6 +340,10 @@ function KdsPage() {
     });
     setOrders(updated);
 
+    // Check if all items are now READY — if so, auto-remove after a short delay
+    const updatedOrder = updated.find((o) => o.id === orderId);
+    const allItemsReady = updatedOrder?.items.every((i: KdsOrderItem) => i.status === 'READY');
+
     // Notify mesero
     if (order && item) {
       useNotificationsStore.getState().addReadyItem({
@@ -344,6 +353,16 @@ function KdsPage() {
         status: 'READY', quantity: item.quantity,
       });
       toast.success(`${item.name} LISTO!`, { icon: '✅', duration: 1500 });
+    }
+
+    // If all items ready, notify all and remove order after delay
+    if (allItemsReady && updatedOrder) {
+      toast.success(`Orden #${updatedOrder.orderNumber} completa!`, { icon: '🎉', duration: 2000 });
+      setTimeout(() => {
+        setOrders((prev) => prev.filter((o) => o.id !== orderId));
+        setBumpedOrderIds((prev) => new Set(prev).add(orderId));
+        updateOrderStatus(orderId, 'CLOSED').catch(() => { /* demo mode */ });
+      }, 1500);
     }
   };
 
