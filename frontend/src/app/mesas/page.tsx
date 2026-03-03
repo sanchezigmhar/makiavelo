@@ -1139,7 +1139,12 @@ export default function MesasPage() {
           const demoOrder = demoOrdersForStatus.find((o) => o.tableId === t.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
 
           // Determine actual status: respect CLEANING/RESERVED, otherwise check for active orders
-          const hasActiveOrder = !!(activeOrder || storeOrder || demoOrder || (savedLink?.orderId));
+          // Only count savedLink if there's a matching active order (prevents stale links from keeping tables occupied)
+          const savedLinkIsActive = savedLink?.orderId && (
+            activeOrders.some((o) => o.id === savedLink.orderId && o.status !== 'CLOSED' && o.status !== 'CANCELLED')
+            || demoOrdersForStatus.some((o) => o.id === savedLink.orderId && o.status !== 'CLOSED' && o.status !== 'CANCELLED')
+          );
+          const hasActiveOrder = !!(activeOrder || storeOrder || demoOrder || savedLinkIsActive);
           const preservedStatuses = ['CLEANING', 'RESERVED', 'BLOCKED'];
           const effectiveStatus = preservedStatuses.includes(t.status)
             ? t.status  // Respect manual status changes (cleaning after payment, reservations, etc.)
@@ -1589,12 +1594,13 @@ export default function MesasPage() {
       if (table.status === 'OCCUPIED') {
         let existingOrder: import('@/types').Order | null = null;
 
-        // Helper: load demo orders directly from localStorage
+        // Helper: load active demo orders directly from localStorage (excludes CLOSED/CANCELLED)
         const loadDemoLocal = (): import('@/types').Order[] => {
           try {
             const stored = localStorage.getItem('makiavelo-demo-orders');
             if (!stored) return [];
-            return JSON.parse(stored) as import('@/types').Order[];
+            const all = JSON.parse(stored) as import('@/types').Order[];
+            return all.filter((o) => o.status !== 'CLOSED' && o.status !== 'CANCELLED');
           } catch { return []; }
         };
 
@@ -1698,12 +1704,13 @@ export default function MesasPage() {
 
       let foundOrder: import('@/types').Order | null = null;
 
-      // Helper: load demo orders directly from localStorage (avoids stale closures)
+      // Helper: load active demo orders from localStorage (excludes CLOSED/CANCELLED)
       const loadDemoOrdersLocal = (): import('@/types').Order[] => {
         try {
           const stored = localStorage.getItem('makiavelo-demo-orders');
           if (!stored) return [];
-          return JSON.parse(stored) as import('@/types').Order[];
+          const all = JSON.parse(stored) as import('@/types').Order[];
+          return all.filter((o) => o.status !== 'CLOSED' && o.status !== 'CANCELLED');
         } catch { return []; }
       };
 

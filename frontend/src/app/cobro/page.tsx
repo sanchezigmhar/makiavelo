@@ -265,13 +265,33 @@ function CobroPage() {
     : selectedMethod !== 'CASH' || cashValue >= currentPaymentAmount;
   const resolvedTableId = searchParams?.get('tableId') || order.tableId || null;
 
-  const cleanupTableStorage = (tId: string | null) => {
+  const cleanupTableStorage = (tId: string | null, orderId?: string) => {
     if (!tId) return;
     try {
+      // 1. Remove table→order link
       const tableOrders = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
       if (tableOrders[tId]) { delete tableOrders[tId]; localStorage.setItem('makiavelo-table-orders', JSON.stringify(tableOrders)); }
+      // 2. Remove merged table order link
       const mergedOrders = JSON.parse(localStorage.getItem('makiavelo-merged-table-orders') || '{}');
       if (mergedOrders[tId]) { delete mergedOrders[tId]; localStorage.setItem('makiavelo-merged-table-orders', JSON.stringify(mergedOrders)); }
+      // 3. Mark/remove demo orders for this table from localStorage
+      //    This prevents stale orders from showing up in cobro or making mesa appear OCCUPIED
+      const storedDemos = localStorage.getItem('makiavelo-demo-orders');
+      if (storedDemos) {
+        const demoOrders = JSON.parse(storedDemos) as any[];
+        const cleaned = demoOrders.filter((o) => {
+          // Remove by orderId if provided
+          if (orderId && o.id === orderId) return false;
+          // Remove any non-closed order for this table
+          if (o.tableId === tId && o.status !== 'CLOSED' && o.status !== 'CANCELLED') return false;
+          return true;
+        });
+        if (cleaned.length > 0) {
+          localStorage.setItem('makiavelo-demo-orders', JSON.stringify(cleaned));
+        } else {
+          localStorage.removeItem('makiavelo-demo-orders');
+        }
+      }
     } catch { /* ignore */ }
   };
 
@@ -300,7 +320,7 @@ function CobroPage() {
       isLastPayment = summary?.isFullyPaid || (totalPaidSoFar + paymentAmount >= totalWithTip - 0.01);
       if (isLastPayment) {
         // Don't change table status yet — user will choose limpieza or disponible
-        cleanupTableStorage(resolvedTableId);
+        cleanupTableStorage(resolvedTableId, order.id);
       }
     } catch {
       // Demo fallback
@@ -308,7 +328,9 @@ function CobroPage() {
       if (isLastPayment) {
         await updateOrderStatus(order.id, 'CLOSED');
         // Don't change table status yet — user will choose limpieza or disponible
-        cleanupTableStorage(resolvedTableId);
+        // Note: updateOrderStatus already calls saveDemoOrders which removes CLOSED orders from activeOrders,
+        // but we also need to clean localStorage links and any stale demo order data
+        cleanupTableStorage(resolvedTableId, order.id);
       }
     }
 
@@ -389,6 +411,21 @@ function CobroPage() {
 
   const handleTableCleanup = async (sendToCleaning: boolean) => {
     setShowCleanupDialog(false);
+    // IMPORTANT: Clean up all stale data BEFORE changing table status.
+    // This prevents the mesas canvas rebuild from finding stale demo orders
+    // and overriding the table status back to OCCUPIED.
+    cleanupTableStorage(resolvedTableId, order.id);
+    // Also force-remove this order from activeOrders in the store
+    // (in case it wasn't properly removed during payment)
+    try {
+      const { activeOrders } = useOrdersStore.getState();
+      if (activeOrders.some((o) => o.id === order.id)) {
+        useOrdersStore.setState({
+          activeOrders: activeOrders.filter((o) => o.id !== order.id),
+        });
+      }
+    } catch { /* ignore */ }
+
     if (resolvedTableId) {
       const newStatus = sendToCleaning ? 'CLEANING' : 'AVAILABLE';
       try { await updateTableStatus(resolvedTableId, newStatus as any); } catch { /* demo */ }
@@ -399,7 +436,7 @@ function CobroPage() {
       const { readyItems, markDelivered } = useNotificationsStore.getState();
       readyItems
         .filter((n) => n.tableNumber === tableNum || n.orderId === order.id)
-        .forEach((n) => markDelivered(n.id));
+        .forEach((n) => markDelivered(n.itemId));
     } catch { /* ignore */ }
     // Clear bumped order from KDS localStorage
     try {

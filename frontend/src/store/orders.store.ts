@@ -344,12 +344,12 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       return orders;
     } catch (err) {
       console.log('[ORDERS_STORE] fetchOrdersByTable error:', err);
-      // Fallback: search activeOrders in memory
-      let fallback = get().activeOrders.filter((o) => o.tableId === tableId);
+      // Fallback: search activeOrders in memory (exclude CLOSED/CANCELLED)
+      let fallback = get().activeOrders.filter((o) => o.tableId === tableId && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
       // Also check persisted demo orders
       if (fallback.length === 0) {
         const demoOrders = loadDemoOrders();
-        fallback = demoOrders.filter((o) => o.tableId === tableId);
+        fallback = demoOrders.filter((o) => o.tableId === tableId && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
       }
       console.log('[ORDERS_STORE] fetchOrdersByTable fallback:', fallback.length, 'orders');
       return fallback;
