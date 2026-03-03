@@ -1793,7 +1793,32 @@ export default function MesasPage() {
       setShowTableSheet(false);
       const params = new URLSearchParams();
       params.set('tableId', table.id);
-      if (table.currentOrderId) params.set('orderId', table.currentOrderId);
+
+      // Find orderId: check table first, then localStorage demo orders, then activeOrders
+      let orderId = table.currentOrderId;
+      if (!orderId) {
+        try {
+          const stored = localStorage.getItem('makiavelo-demo-orders');
+          if (stored) {
+            const demoOrders = JSON.parse(stored) as { id: string; tableId?: string; status: string }[];
+            const match = demoOrders.find((o) => o.tableId === table.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
+            if (match) orderId = match.id;
+          }
+        } catch { /* ignore */ }
+      }
+      if (!orderId) {
+        const { activeOrders: allActive } = useOrdersStore.getState();
+        const memOrder = allActive.find((o) => o.tableId === table.id && o.status !== 'CLOSED' && o.status !== 'CANCELLED');
+        if (memOrder) orderId = memOrder.id;
+      }
+      if (!orderId) {
+        try {
+          const savedLinks = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
+          if (savedLinks[table.id]?.orderId) orderId = savedLinks[table.id].orderId;
+        } catch { /* ignore */ }
+      }
+
+      if (orderId) params.set('orderId', orderId);
       router.push(`/cobro?${params.toString()}`);
     },
     [router]

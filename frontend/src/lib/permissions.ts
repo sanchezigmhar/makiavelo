@@ -61,9 +61,9 @@ export const DEMO_PERMISSIONS: Record<string, Permission[]> = {
   manager: ['all'],
   // Cajero — cobra, ve pedidos/productos/clientes
   cashier: ['orders', 'payments', 'customers', 'products'],
-  // Mesero — atiende mesas, crea pedidos, ve menu
-  server: ['tables', 'orders', 'products'],
-  waiter: ['tables', 'orders', 'products'],
+  // Mesero — atiende mesas, crea pedidos, ve menu, cobra
+  server: ['tables', 'orders', 'products', 'payments'],
+  waiter: ['tables', 'orders', 'products', 'payments'],
   // Cocinero — solo su pantalla KDS y consulta de inventario
   chef: ['kds', 'inventory'],
   kitchen: ['kds', 'inventory'],

@@ -167,6 +167,36 @@ function CobroPage() {
         if (memOrder) foundOrder = memOrder;
       }
 
+      // Strategy: Search localStorage demo orders by orderId or tableId
+      if (!foundOrder) {
+        try {
+          const stored = localStorage.getItem('makiavelo-demo-orders');
+          if (stored) {
+            const demoOrders = JSON.parse(stored) as Order[];
+            if (orderId) foundOrder = demoOrders.find((o) => o.id === orderId) || null;
+            if (!foundOrder && tableId) foundOrder = demoOrders.find((o) => o.tableId === tableId && o.status !== 'CLOSED' && o.status !== 'CANCELLED') || null;
+          }
+        } catch { /* ignore */ }
+      }
+
+      // Strategy: Check table-orders link in localStorage
+      if (!foundOrder) {
+        try {
+          const savedLinks = JSON.parse(localStorage.getItem('makiavelo-table-orders') || '{}');
+          const linkOrderId = tableId ? savedLinks[tableId]?.orderId : null;
+          if (linkOrderId) {
+            foundOrder = await fetchOrder(linkOrderId);
+            if (!foundOrder) {
+              const stored = localStorage.getItem('makiavelo-demo-orders');
+              if (stored) {
+                const demoOrders = JSON.parse(stored) as Order[];
+                foundOrder = demoOrders.find((o) => o.id === linkOrderId) || null;
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
       if (!foundOrder && tableId) {
         const { tables } = useTablesStore.getState();
         const storeTable = tables.find((t) => t.id === tableId) as any; // eslint-disable-line
