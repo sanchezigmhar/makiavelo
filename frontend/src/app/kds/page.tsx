@@ -97,7 +97,20 @@ function KdsPage() {
   const kdsTitle = ROLE_KDS_TITLE[roleSlug] || '🔥 Cocina';
 
   const [orders, setOrders] = useState<KdsOrder[]>([]);
-  const [bumpedOrderIds, setBumpedOrderIds] = useState<Set<string>>(new Set());
+
+  // Persist bumpedOrderIds in localStorage so orders stay removed after page reload
+  const BUMPED_KEY = 'makiavelo-kds-bumped';
+  const [bumpedOrderIds, setBumpedOrderIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(BUMPED_KEY);
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
+  // Sync bumpedOrderIds to localStorage whenever it changes
+  useEffect(() => {
+    try { localStorage.setItem(BUMPED_KEY, JSON.stringify(Array.from(bumpedOrderIds))); } catch { /* */ }
+  }, [bumpedOrderIds]);
+
   const [selectedStation, setSelectedStation] = useState(defaultStation);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullScreen, setIsFullScreen] = useState(false);
