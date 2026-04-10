@@ -15,7 +15,7 @@ import {
 import KdsOrderCard from '@/components/common/KdsOrderCard';
 import RequirePermission from '@/components/common/RequirePermission';
 import { cn } from '@/lib/utils';
-import type { KdsOrder, KdsOrderItem } from '@/types';
+import type { KdsOrder, KdsOrderItem, Order } from '@/types';
 import api from '@/lib/api';
 import { useSocketEvent } from '@/hooks/useSocket';
 import { useOrdersStore } from '@/store/orders.store';
@@ -137,6 +137,47 @@ function KdsPage() {
   const demoOrders: KdsOrder[] = useMemo(() => [], []);
 
   const isUsingBackend = useRef(false);
+
+  // Cross-tab sync: reload demo orders from localStorage when another tab writes them
+  useEffect(() => {
+    const DEMO_ORDERS_KEY = 'makiavelo-demo-orders';
+
+    const syncFromStorage = () => {
+      if (isUsingBackend.current) return;
+      try {
+        const stored = localStorage.getItem(DEMO_ORDERS_KEY);
+        if (!stored) return;
+        const demoOrders = JSON.parse(stored) as Order[];
+        const current = useOrdersStore.getState().activeOrders;
+        // Only update if there are new orders not yet in the store
+        const currentIds = new Set(current.map((o) => o.id));
+        const hasNew = demoOrders.some((o) => !currentIds.has(o.id));
+        const hasStatusChange = demoOrders.some((o) => {
+          const existing = current.find((c) => c.id === o.id);
+          return existing && existing.status !== o.status;
+        });
+        if (hasNew || hasStatusChange) {
+          // Merge: keep store orders that aren't in localStorage, add all from localStorage
+          const nonDemo = current.filter((o) => !o.id?.startsWith('demo_'));
+          useOrdersStore.setState({ activeOrders: [...nonDemo, ...demoOrders] });
+        }
+      } catch { /* ignore */ }
+    };
+
+    // Listen for storage events from other tabs
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === DEMO_ORDERS_KEY) syncFromStorage();
+    };
+    window.addEventListener('storage', onStorage);
+
+    // Also poll every 3s as fallback (same-tab navigation doesn't trigger storage event)
+    const poll = setInterval(syncFromStorage, 3000);
+
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      clearInterval(poll);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchOrders = async () => {
